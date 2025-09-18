@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, ReactNode } from 'react';
+import React, { createContext, useContext, useReducer, ReactNode, useCallback } from 'react';
 import { SurpriseBag, Restaurant, UserLocation, FilterOptions, BagCategory } from '@/types/SurpriseBag';
 
 interface SurpriseBagState {
@@ -232,7 +232,7 @@ const SurpriseBagContext = createContext<SurpriseBagContextType | undefined>(und
 export function SurpriseBagProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(surpriseBagReducer, initialState);
 
-  const getFilteredBags = (): SurpriseBag[] => {
+  const getFilteredBags = useCallback((): SurpriseBag[] => {
     let filtered = state.bags;
 
     if (state.filters.category) {
@@ -256,31 +256,31 @@ export function SurpriseBagProvider({ children }: { children: ReactNode }) {
     }
 
     return filtered;
-  };
+  }, [state.bags, state.filters, state.userLocation]);
 
-  const getBagsByCategory = (category: BagCategory): SurpriseBag[] => {
+  const getBagsByCategory = useCallback((category: BagCategory): SurpriseBag[] => {
     return state.bags.filter(bag => bag.category === category);
-  };
+  }, [state.bags]);
 
-  const getPopularBags = (): SurpriseBag[] => {
+  const getPopularBags = useCallback((): SurpriseBag[] => {
     return state.bags.filter(bag => bag.isPopular);
-  };
+  }, [state.bags]);
 
-  const getNearbyBags = (maxDistance: number = 5): SurpriseBag[] => {
+  const getNearbyBags = useCallback((maxDistance: number = 5): SurpriseBag[] => {
     return state.bags.filter(bag => bag.distance <= maxDistance);
-  };
+  }, [state.bags]);
 
-  const toggleFavorite = (bagId: string) => {
+  const toggleFavorite = useCallback((bagId: string) => {
     dispatch({ type: 'TOGGLE_FAVORITE', payload: bagId });
-  };
+  }, []);
 
-  const updateFilters = (filters: Partial<FilterOptions>) => {
+  const updateFilters = useCallback((filters: Partial<FilterOptions>) => {
     dispatch({ type: 'UPDATE_FILTERS', payload: filters });
-  };
+  }, []);
 
-  const setUserLocation = (location: UserLocation) => {
+  const setUserLocation = useCallback((location: UserLocation) => {
     dispatch({ type: 'SET_USER_LOCATION', payload: location });
-  };
+  }, []);
 
   const value: SurpriseBagContextType = {
     state,

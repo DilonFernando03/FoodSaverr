@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, Alert, Dimensions } from 'react-native';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
+import { LocationButton } from '@/components/LocationButton';
+import { LocationDisplay } from '@/components/LocationDisplay';
 import { useSurpriseBag } from '@/contexts/SurpriseBagContext';
+import { useLocationContext } from '@/contexts/LocationContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { SurpriseBag, BagCategory, UserLocation } from '@/types/SurpriseBag';
@@ -15,6 +18,7 @@ export default function DiscoverScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { state, getPopularBags, getNearbyBags, toggleFavorite, setUserLocation } = useSurpriseBag();
+  const { location: currentLocation, loading: locationLoading } = useLocationContext();
   const [selectedCategory, setSelectedCategory] = useState<BagCategory | null>(null);
 
   useEffect(() => {
@@ -29,6 +33,33 @@ export default function DiscoverScreen() {
     };
     setUserLocation(defaultLocation);
   }, []);
+
+  // Update user location when current location changes
+  useEffect(() => {
+    if (currentLocation) {
+      const locationUpdate: UserLocation = {
+        city: 'Current Location',
+        address: 'Your current location',
+        coordinates: {
+          lat: currentLocation.latitude,
+          lng: currentLocation.longitude,
+        },
+      };
+      setUserLocation(locationUpdate);
+    }
+  }, [currentLocation]); // Removed setUserLocation from dependencies
+
+  const handleLocationUpdate = useCallback((location: { latitude: number; longitude: number }) => {
+    const locationUpdate: UserLocation = {
+      city: 'Current Location',
+      address: 'Your current location',
+      coordinates: {
+        lat: location.latitude,
+        lng: location.longitude,
+      },
+    };
+    setUserLocation(locationUpdate);
+  }, [setUserLocation]);
 
   const popularBags = getPopularBags();
   const nearbyBags = getNearbyBags();
@@ -136,9 +167,22 @@ export default function DiscoverScreen() {
             {state.userLocation?.city || 'Colombo'}, Sri Lanka
           </ThemedText>
         </ThemedView>
-        <TouchableOpacity style={styles.locationButton}>
-          <IconSymbol name="chevron.down" size={16} color={colors.icon} />
-        </TouchableOpacity>
+        <ThemedView style={styles.locationActions}>
+          <LocationButton
+            onLocationUpdate={handleLocationUpdate}
+            style={[styles.getLocationButton, { backgroundColor: colors.primary }]}
+            textStyle={styles.getLocationText}
+            showText={false}
+          />
+          <TouchableOpacity style={styles.locationButton}>
+            <IconSymbol name="chevron.down" size={16} color={colors.icon} />
+          </TouchableOpacity>
+        </ThemedView>
+      </ThemedView>
+
+      {/* Current Location Display */}
+      <ThemedView style={styles.locationDisplayContainer}>
+        <LocationDisplay showRefreshButton={true} />
       </ThemedView>
 
       {/* From well-known brands */}
@@ -238,6 +282,24 @@ const styles = StyleSheet.create({
   },
   locationButton: {
     padding: 8,
+  },
+  locationActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  getLocationButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    minHeight: 36,
+  },
+  getLocationText: {
+    fontSize: 12,
+  },
+  locationDisplayContainer: {
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
   sectionContainer: {
     marginBottom: 24,
