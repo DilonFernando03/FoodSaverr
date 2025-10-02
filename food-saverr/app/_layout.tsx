@@ -8,6 +8,8 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { FoodProvider } from '@/contexts/FoodContext';
 import { SurpriseBagProvider } from '@/contexts/SurpriseBagContext';
 import { LocationProvider } from '@/contexts/LocationContext';
+import { AuthProvider } from '@/contexts/AuthContext';
+import { ShopProvider } from '@/contexts/ShopContext';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -21,18 +23,24 @@ export default function RootLayout() {
   }
 
   return (
-    <LocationProvider>
-      <SurpriseBagProvider>
-        <FoodProvider>
-          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen name="+not-found" />
-            </Stack>
-            <StatusBar style="auto" />
-          </ThemeProvider>
-        </FoodProvider>
-      </SurpriseBagProvider>
-    </LocationProvider>
+    <AuthProvider>
+      <LocationProvider>
+        <SurpriseBagProvider>
+          <FoodProvider>
+            <ShopProvider>
+              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                <Stack>
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="(shop-tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="auth" options={{ headerShown: false }} />
+                  <Stack.Screen name="+not-found" />
+                </Stack>
+                <StatusBar style="auto" />
+              </ThemeProvider>
+            </ShopProvider>
+          </FoodProvider>
+        </SurpriseBagProvider>
+      </LocationProvider>
+    </AuthProvider>
   );
 }

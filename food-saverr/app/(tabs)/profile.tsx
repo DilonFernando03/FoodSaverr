@@ -5,10 +5,15 @@ import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { useAuth } from '@/contexts/AuthContext';
+import { Customer } from '@/types/User';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { user, logout } = useAuth();
+  
+  const customer = user?.userType === 'customer' ? (user as Customer) : null;
 
   const menuItems = [
     {
@@ -36,6 +41,24 @@ export default function ProfileScreen() {
       icon: 'info.circle.fill',
       onPress: () => Alert.alert('About FoodSaverr', 'Version 1.0.0\nBuilt for Sri Lanka'),
     },
+    {
+      title: 'Logout',
+      icon: 'rectangle.portrait.and.arrow.right',
+      onPress: () => {
+        Alert.alert(
+          'Logout',
+          'Are you sure you want to logout?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Logout', 
+              style: 'destructive',
+              onPress: logout
+            },
+          ]
+        );
+      },
+    },
   ];
 
   return (
@@ -51,14 +74,18 @@ export default function ProfileScreen() {
           <IconSymbol name="person.fill" size={32} color={colors.background} />
         </ThemedView>
         <ThemedView style={styles.userInfo}>
-          <ThemedText style={[styles.userName, { color: colors.text }]}>Welcome to FoodSaverr</ThemedText>
+          <ThemedText style={[styles.userName, { color: colors.text }]}>
+            {customer ? customer.name : 'Welcome to FoodSaverr'}
+          </ThemedText>
           <ThemedText style={[styles.userEmail, { color: colors.onSurface }]}>
-            Sign in to save your favorites
+            {customer ? customer.email : 'Sign in to save your favorites'}
           </ThemedText>
         </ThemedView>
-        <TouchableOpacity style={[styles.signInButton, { backgroundColor: colors.primary }]}>
-          <ThemedText style={[styles.signInText, { color: colors.background }]}>Sign In</ThemedText>
-        </TouchableOpacity>
+        {!customer && (
+          <TouchableOpacity style={[styles.signInButton, { backgroundColor: colors.primary }]}>
+            <ThemedText style={[styles.signInText, { color: colors.background }]}>Sign In</ThemedText>
+          </TouchableOpacity>
+        )}
       </ThemedView>
 
       {/* Stats */}
