@@ -101,9 +101,7 @@ CREATE TABLE surprise_bags (
     description TEXT,
     original_price DECIMAL(10,2) NOT NULL,
     discounted_price DECIMAL(10,2) NOT NULL,
-    discount_percentage INTEGER GENERATED ALWAYS AS (
-        ROUND(((original_price - discounted_price) / original_price * 100)::numeric, 0)::integer
-    ) STORED,
+    discount_percentage INTEGER,
     total_quantity INTEGER NOT NULL,
     remaining_quantity INTEGER NOT NULL,
     
@@ -118,9 +116,7 @@ CREATE TABLE surprise_bags (
     
     -- Status
     is_active BOOLEAN DEFAULT true,
-    is_available BOOLEAN GENERATED ALWAYS AS (
-        is_active AND remaining_quantity > 0 AND collection_date >= CURRENT_DATE
-    ) STORED,
+    is_available BOOLEAN DEFAULT true,
     is_popular BOOLEAN DEFAULT false,
     
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -286,6 +282,24 @@ CREATE TRIGGER update_shop_rating_on_review_insert AFTER INSERT ON reviews FOR E
 CREATE TRIGGER update_shop_rating_on_review_update AFTER UPDATE ON reviews FOR EACH ROW EXECUTE FUNCTION update_shop_rating();
 CREATE TRIGGER update_shop_rating_on_review_delete AFTER DELETE ON reviews FOR EACH ROW EXECUTE FUNCTION update_shop_rating();
 
+-- Function to calculate discount percentage
+CREATE OR REPLACE FUNCTION calculate_discount_percentage()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.discount_percentage = ROUND(((NEW.original_price - NEW.discounted_price) / NEW.original_price * 100)::numeric, 0)::integer;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Function to update availability status
+CREATE OR REPLACE FUNCTION update_bag_availability()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.is_available = NEW.is_active AND NEW.remaining_quantity > 0 AND NEW.collection_date >= CURRENT_DATE;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
 -- Function to update remaining quantity when order is placed
 CREATE OR REPLACE FUNCTION update_bag_quantity()
 RETURNS TRIGGER AS $$
@@ -303,6 +317,10 @@ BEGIN
     RETURN NEW;
 END;
 $$ language 'plpgsql';
+
+-- Triggers for surprise_bags table
+CREATE TRIGGER calculate_discount_percentage_trigger BEFORE INSERT OR UPDATE ON surprise_bags FOR EACH ROW EXECUTE FUNCTION calculate_discount_percentage();
+CREATE TRIGGER update_bag_availability_trigger BEFORE INSERT OR UPDATE ON surprise_bags FOR EACH ROW EXECUTE FUNCTION update_bag_availability();
 
 -- Trigger to update bag quantity on order status change
 CREATE TRIGGER update_bag_quantity_on_order_change AFTER INSERT OR UPDATE ON bag_orders FOR EACH ROW EXECUTE FUNCTION update_bag_quantity();
@@ -419,5 +437,5 @@ INSERT INTO shop_operating_hours (shop_id, day_of_week, open_time, close_time, i
     ('550e8400-e29b-41d4-a716-446655440002', 0, '09:00', '17:00', true);
 
 -- Create sample surprise bag
-INSERT INTO surprise_bags (shop_id, category, title, description, original_price, discounted_price, total_quantity, remaining_quantity, collection_date, collection_start_time, collection_end_time, tags) VALUES
-    ('550e8400-e29b-41d4-a716-446655440002', 'bread_pastries', 'Bread & Cookies', 'Fresh bread and cookies that need to go today', 600.00, 220.00, 5, 5, CURRENT_DATE + INTERVAL '1 day', '09:30', '10:00', ARRAY['bread', 'cookies', 'bakery']);
+INSERT INTO surprise_bags (shop_id, category, title, description, original_price, discounted_price, discount_percentage, total_quantity, remaining_quantity, collection_date, collection_start_time, collection_end_time, tags) VALUES
+    ('550e8400-e29b-41d4-a716-446655440002', 'bread_pastries', 'Bread & Cookies', 'Fresh bread and cookies that need to go today', 600.00, 220.00, 63, 5, 5, CURRENT_DATE + INTERVAL '1 day', '09:30', '10:00', ARRAY['bread', 'cookies', 'bakery']);

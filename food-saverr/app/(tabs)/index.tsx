@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, Alert, Dimensions } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -157,8 +158,9 @@ export default function DiscoverScreen() {
   );
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Location Selector */}
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Location Selector */}
       <ThemedView style={[styles.locationContainer, { backgroundColor: colors.surface }]}>
         <IconSymbol name="location.fill" size={20} color={colors.primary} />
         <ThemedView style={styles.locationTextContainer}>
@@ -251,12 +253,16 @@ export default function DiscoverScreen() {
           {state.bags.filter(bag => bag.itemsLeft <= 2).map(renderSurpriseBagCard)}
         </ScrollView>
       </ThemedView>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  scrollView: {
     flex: 1,
     paddingTop: 8,
   },

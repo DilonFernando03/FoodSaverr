@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,21 +10,26 @@ import {
   Platform,
   ScrollView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { UserType } from '@/types/User';
  
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   
-  const { login, error } = useAuth();
+  const { login, error, isAuthenticated, user, isLoading } = useAuth();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+
+  // Note: We don't auto-redirect from login screen to prevent loops
+  // The index screen handles the redirect logic
 
   
 
@@ -34,29 +39,69 @@ export default function LoginScreen() {
       return;
     }
 
-    setIsLoading(true);
+    setIsLoggingIn(true);
     try {
       await login({ email: email.trim(), password });
-      // Navigation will be handled by the auth state change
+      console.log('Login completed, checking user state...');
+      // Force a small delay to ensure state is updated
+      setTimeout(() => {
+        // Redirect will happen via the index screen
+        router.replace('/');
+      }, 100);
     } catch (error) {
-      // Error is handled by the context
+      // Surface the error to the user as well (web/mobile)
+      const message = (error as any)?.message || 'Login failed. Please try again.';
+      Alert.alert('Sign in failed', message);
     } finally {
-      setIsLoading(false);
+      setIsLoggingIn(false);
     }
   };
 
-  const handleDemoLogin = (userType: 'customer' | 'shop') => {
+  const handleDemoLogin = async (userType: 'customer' | 'shop') => {
     const demoEmail = userType === 'shop' ? 'shop@demo.com' : 'customer@demo.com';
+    const demoPassword = 'demo123';
+    
     setEmail(demoEmail);
-    setPassword('demo123');
+    setPassword(demoPassword);
+    
+    // Automatically submit the login
+    setIsLoggingIn(true);
+    try {
+      await login({ email: demoEmail, password: demoPassword });
+      console.log('Demo login completed, checking user state...');
+      // Force a small delay to ensure state is updated
+      setTimeout(() => {
+        // Redirect will happen via the index screen
+        router.replace('/');
+      }, 100);
+    } catch (error) {
+      // Error is handled by the context
+      console.error('Demo login error:', error);
+    } finally {
+      setIsLoggingIn(false);
+    }
   };
 
+  // Show loading screen while checking authentication
+  if (isLoading) {
+    return (
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
+        <View style={styles.loadingContainer}>
+          <Text style={[styles.loadingText, { color: colors.text }]}>
+            Checking authentication...
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
-    <KeyboardAvoidingView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <ScrollView contentContainerStyle={styles.scrollContainer}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <KeyboardAvoidingView
+        style={styles.keyboardView}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      >
+        <ScrollView contentContainerStyle={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.text }]}>Welcome Back</Text>
           <Text style={[styles.subtitle, { color: colors.text }]}>
@@ -106,7 +151,7 @@ export default function LoginScreen() {
           </View>
 
           {error && (
-            <Text style={[styles.errorText, { color: colors.notification }]}>
+            <Text style={[styles.errorText, { color: '#FF3B30' }]}>
               {error}
             </Text>
           )}
@@ -115,13 +160,13 @@ export default function LoginScreen() {
             style={[
               styles.loginButton,
               { backgroundColor: colors.tint },
-              isLoading && styles.disabledButton,
+              (isLoggingIn || isLoading) && styles.disabledButton,
             ]}
             onPress={handleLogin}
-            disabled={isLoading}
+            disabled={isLoggingIn || isLoading}
           >
             <Text style={styles.loginButtonText}>
-              {isLoading ? 'Signing In...' : 'Sign In'}
+              {isLoggingIn ? 'Signing In...' : 'Sign In'}
             </Text>
           </TouchableOpacity>
 
@@ -164,12 +209,16 @@ export default function LoginScreen() {
           
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  keyboardView: {
     flex: 1,
   },
   scrollContainer: {
@@ -273,5 +322,26 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     opacity: 0.7,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  authenticatedMessage: {
+    margin: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  authenticatedText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  authenticatedSubtext: {
+    fontSize: 14,
+    opacity: 0.8,
   },
 });

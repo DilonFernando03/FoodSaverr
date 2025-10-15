@@ -10,6 +10,8 @@ import {
   TextInput,
   Switch,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
@@ -18,6 +20,7 @@ import { Shop } from '@/types/User';
 
 export default function ShopProfileScreen() {
   const { user, logout, updateUser } = useAuth();
+  const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [showEditModal, setShowEditModal] = useState(false);
@@ -114,7 +117,18 @@ export default function ShopProfileScreen() {
         { 
           text: 'Logout', 
           style: 'destructive',
-          onPress: logout
+          onPress: async () => {
+            console.log('Logging out shop owner...');
+            try {
+              await logout();
+              console.log('Shop logout successful, redirecting to login...');
+              router.replace('/auth/login');
+            } catch (error) {
+              console.error('Shop logout error:', error);
+              // Force redirect to login even if logout fails
+              router.replace('/auth/login');
+            }
+          }
         },
       ]
     );
@@ -131,8 +145,9 @@ export default function ShopProfileScreen() {
   }
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
         <View style={styles.profileHeader}>
           <View style={[styles.avatar, { backgroundColor: colors.tint }]}>
             <Text style={styles.avatarText}>
@@ -269,13 +284,16 @@ export default function ShopProfileScreen() {
             <IconSymbol name="envelope" size={24} color={colors.tint} />
             <Text style={[styles.actionText, { color: colors.text }]}>Contact</Text>
           </TouchableOpacity>
-          
+        </View>
+        
+        {/* Logout Button - Separate Section */}
+        <View style={styles.logoutSection}>
           <TouchableOpacity
-            style={[styles.actionCard, { backgroundColor: colors.destructive }]}
+            style={[styles.logoutButton, { backgroundColor: '#FF3B30' }]}
             onPress={handleLogout}
           >
-            <IconSymbol name="rectangle.portrait.and.arrow.right" size={24} color="white" />
-            <Text style={[styles.actionText, { color: 'white' }]}>Logout</Text>
+            <IconSymbol name="rectangle.portrait.and.arrow.right" size={20} color="white" />
+            <Text style={styles.logoutButtonText}>Logout</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -513,14 +531,17 @@ export default function ShopProfileScreen() {
           </ScrollView>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    paddingTop: 60,
+  },
+  scrollView: {
+    flex: 1,
   },
   header: {
     paddingHorizontal: 20,
@@ -627,6 +648,28 @@ const styles = StyleSheet.create({
   },
   actionText: {
     fontSize: 14,
+    fontWeight: '600',
+  },
+  logoutSection: {
+    marginTop: 20,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  logoutButtonText: {
+    color: 'white',
+    fontSize: 16,
     fontWeight: '600',
   },
   modalContainer: {

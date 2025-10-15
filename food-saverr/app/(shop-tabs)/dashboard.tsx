@@ -8,6 +8,7 @@ import {
   Alert,
   RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { useShop } from '@/contexts/ShopContext';
@@ -100,94 +101,140 @@ export default function ShopDashboardScreen() {
   }
 
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: colors.background }]}
-      refreshControl={
-        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-      }
-    >
-      <View style={styles.header}>
-        <View>
-          <Text style={[styles.greeting, { color: colors.text }]}>
-            Welcome back,
-          </Text>
-          <Text style={[styles.businessName, { color: colors.text }]}>
-            {shop.businessInfo.businessName}
-          </Text>
-        </View>
-        <TouchableOpacity
-          style={[styles.profileButton, { backgroundColor: colors.tint }]}
-          onPress={() => router.push('/(shop-tabs)/profile')}
-        >
-          <IconSymbol name="person.fill" size={24} color="white" />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.statsContainer}>
-        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
-          <IconSymbol name="bag.fill" size={32} color={colors.tint} />
-          <Text style={[styles.statNumber, { color: colors.text }]}>
-            {activeBags.length}
-          </Text>
-          <Text style={[styles.statLabel, { color: colors.text }]}>
-            Active Bags
-          </Text>
-        </View>
-
-        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
-          <IconSymbol name="clock.fill" size={32} color={colors.tint} />
-          <Text style={[styles.statNumber, { color: colors.text }]}>
-            {todaysBags.length}
-          </Text>
-          <Text style={[styles.statLabel, { color: colors.text }]}>
-            Today's Bags
-          </Text>
-        </View>
-
-        <View style={[styles.statCard, { backgroundColor: colors.card }]}>
-          <IconSymbol name="star.fill" size={32} color={colors.tint} />
-          <Text style={[styles.statNumber, { color: colors.text }]}>
-            {shop.rating.average.toFixed(1)}
-          </Text>
-          <Text style={[styles.statLabel, { color: colors.text }]}>
-            Rating
-          </Text>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <ScrollView
+        style={styles.scrollView}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+        showsVerticalScrollIndicator={false}
+      >
+      {/* Header with Business Info */}
+      <View style={[styles.header, { backgroundColor: colors.tint }]}>
+        <View style={styles.headerContent}>
+          <View style={styles.businessInfo}>
+            <View style={styles.businessAvatar}>
+              <Text style={styles.businessInitial}>
+                {shop.businessInfo.businessName.charAt(0).toUpperCase()}
+              </Text>
+            </View>
+            <View style={styles.businessDetails}>
+              <Text style={styles.greeting}>Welcome back,</Text>
+              <Text style={styles.businessName}>
+                {shop.businessInfo.businessName}
+              </Text>
+              <View style={styles.ratingContainer}>
+                <IconSymbol name="star.fill" size={14} color="#FFD700" />
+                <Text style={styles.rating}>
+                  {shop.rating.average.toFixed(1)} ({shop.rating.totalReviews} reviews)
+                </Text>
+              </View>
+            </View>
+          </View>
+          <TouchableOpacity
+            style={styles.profileButton}
+            onPress={() => router.push('/(shop-tabs)/profile')}
+          >
+            <IconSymbol name="person.fill" size={20} color="white" />
+          </TouchableOpacity>
         </View>
       </View>
 
-      <View style={styles.quickActions}>
+      {/* Today's Overview */}
+      <View style={styles.overviewSection}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Today's Overview</Text>
+        <View style={styles.statsContainer}>
+          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: colors.tint + '20' }]}>
+              <IconSymbol name="bag.fill" size={24} color={colors.tint} />
+            </View>
+            <Text style={[styles.statNumber, { color: colors.text }]}>
+              {activeBags.length}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.text }]}>
+              Active Bags
+            </Text>
+          </View>
+
+          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: '#FF9500' + '20' }]}>
+              <IconSymbol name="clock.fill" size={24} color="#FF9500" />
+            </View>
+            <Text style={[styles.statNumber, { color: colors.text }]}>
+              {todaysBags.length}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.text }]}>
+              Today's Bags
+            </Text>
+          </View>
+
+          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: '#34C759' + '20' }]}>
+              <IconSymbol name="dollarsign.circle.fill" size={24} color="#34C759" />
+            </View>
+            <Text style={[styles.statNumber, { color: colors.text }]}>
+              LKR {analytics?.totalRevenue.toLocaleString() || '0'}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.text }]}>
+              Revenue
+            </Text>
+          </View>
+
+          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.statIconContainer, { backgroundColor: '#FFD700' + '20' }]}>
+              <IconSymbol name="star.fill" size={24} color="#FFD700" />
+            </View>
+            <Text style={[styles.statNumber, { color: colors.text }]}>
+              {shop.rating.average.toFixed(1)}
+            </Text>
+            <Text style={[styles.statLabel, { color: colors.text }]}>
+              Rating
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Quick Actions */}
+      <View style={styles.quickActionsSection}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>
           Quick Actions
         </Text>
         
-        <TouchableOpacity
-          style={[styles.actionButton, { backgroundColor: colors.tint }]}
-          onPress={handleQuickCreateBag}
-        >
-          <IconSymbol name="plus.circle.fill" size={24} color="white" />
-          <Text style={styles.actionButtonText}>Create New Bag</Text>
-        </TouchableOpacity>
-
-        <View style={styles.actionRow}>
+        <View style={styles.actionsGrid}>
           <TouchableOpacity
-            style={[styles.actionButtonSmall, { backgroundColor: colors.card }]}
-            onPress={() => router.push('/(shop-tabs)/bags')}
+            style={[styles.primaryAction, { backgroundColor: colors.tint }]}
+            onPress={handleQuickCreateBag}
           >
-            <IconSymbol name="bag.fill" size={20} color={colors.tint} />
-            <Text style={[styles.actionButtonTextSmall, { color: colors.text }]}>
-              Manage Bags
-            </Text>
+            <IconSymbol name="plus.circle.fill" size={28} color="white" />
+            <Text style={styles.primaryActionText}>Create New Bag</Text>
+            <Text style={styles.primaryActionSubtext}>Start selling today</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={[styles.actionButtonSmall, { backgroundColor: colors.card }]}
-            onPress={() => router.push('/(shop-tabs)/orders')}
-          >
-            <IconSymbol name="list.bullet.rectangle" size={20} color={colors.tint} />
-            <Text style={[styles.actionButtonTextSmall, { color: colors.text }]}>
-              View Orders
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.secondaryActions}>
+            <TouchableOpacity
+              style={[styles.secondaryAction, { backgroundColor: colors.card }]}
+              onPress={() => router.push('/(shop-tabs)/bags')}
+            >
+              <View style={[styles.actionIconContainer, { backgroundColor: colors.tint + '20' }]}>
+                <IconSymbol name="bag.fill" size={20} color={colors.tint} />
+              </View>
+              <Text style={[styles.secondaryActionText, { color: colors.text }]}>
+                Manage Bags
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.secondaryAction, { backgroundColor: colors.card }]}
+              onPress={() => router.push('/(shop-tabs)/orders')}
+            >
+              <View style={[styles.actionIconContainer, { backgroundColor: '#FF9500' + '20' }]}>
+                <IconSymbol name="list.bullet.rectangle" size={20} color="#FF9500" />
+              </View>
+              <Text style={[styles.secondaryActionText, { color: colors.text }]}>
+                View Orders
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -265,59 +312,80 @@ export default function ShopDashboardScreen() {
           </View>
         )}
       </View>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+  },
+  scrollView: {
+    flex: 1,
   },
   header: {
+    paddingTop: 60,
+    paddingBottom: 24,
+    paddingHorizontal: 20,
+  },
+  headerContent: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
-    paddingTop: 60,
   },
-  greeting: {
-    fontSize: 16,
-    opacity: 0.7,
+  businessInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
-  businessName: {
+  businessAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  businessInitial: {
+    color: 'white',
     fontSize: 24,
     fontWeight: 'bold',
   },
+  businessDetails: {
+    flex: 1,
+  },
+  greeting: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 16,
+    marginBottom: 4,
+  },
+  businessName: {
+    color: 'white',
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  ratingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  rating: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 14,
+  },
   profileButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
   },
-  statsContainer: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 24,
-  },
-  statCard: {
-    flex: 1,
-    padding: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    gap: 8,
-  },
-  statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  statLabel: {
-    fontSize: 12,
-    opacity: 0.7,
-    textAlign: 'center',
-  },
-  quickActions: {
+  overviewSection: {
+    paddingHorizontal: 20,
     marginBottom: 24,
   },
   sectionTitle: {
@@ -325,38 +393,82 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     marginBottom: 16,
   },
-  actionButton: {
+  statsContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  statCard: {
+    width: '47%',
     padding: 16,
     borderRadius: 12,
+    alignItems: 'center',
     gap: 8,
-    marginBottom: 12,
   },
-  actionButtonText: {
+  statIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  statNumber: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    fontSize: 12,
+    opacity: 0.7,
+    textAlign: 'center',
+  },
+  quickActionsSection: {
+    paddingHorizontal: 20,
+    marginBottom: 24,
+  },
+  actionsGrid: {
+    gap: 16,
+  },
+  primaryAction: {
+    padding: 20,
+    borderRadius: 16,
+    alignItems: 'center',
+    gap: 8,
+  },
+  primaryActionText: {
     color: 'white',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 18,
+    fontWeight: 'bold',
   },
-  actionRow: {
+  primaryActionSubtext: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+  },
+  secondaryActions: {
     flexDirection: 'row',
     gap: 12,
   },
-  actionButtonSmall: {
+  secondaryAction: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
+    padding: 16,
     borderRadius: 12,
+    alignItems: 'center',
     gap: 8,
   },
-  actionButtonTextSmall: {
+  actionIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  secondaryActionText: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '600',
+    textAlign: 'center',
   },
   analyticsPreview: {
+    paddingHorizontal: 20,
     marginBottom: 24,
   },
   analyticsCard: {
@@ -391,6 +503,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   recentActivity: {
+    paddingHorizontal: 20,
     marginBottom: 24,
   },
   activityItem: {

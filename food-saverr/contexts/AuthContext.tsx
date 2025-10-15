@@ -1,10 +1,6 @@
 import React, { createContext, useContext, useReducer, ReactNode, useEffect } from 'react';
-// Note: AsyncStorage mocked was removed during revert; in production install and import
-const AsyncStorage = {
-  getItem: async (_key: string) => null,
-  setItem: async (_key: string, _value: string) => Promise.resolve(),
-  removeItem: async (_key: string) => Promise.resolve(),
-};
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { supabase, signInUser, signUpUser, signOutUser, getCurrentUser } from '@/lib/supabase';
 import { AuthState, LoginCredentials, SignupCredentials, UserType, Customer, Shop } from '@/types/User';
 
 interface AuthContextType extends AuthState {
@@ -23,7 +19,7 @@ type AuthAction =
 const initialState: AuthState = {
   user: null,
   isAuthenticated: false,
-  isLoading: false, // Start with false since we're mocking AsyncStorage
+  isLoading: true, // Start with true to check auth status
   error: null,
 };
 
@@ -53,72 +49,82 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(authReducer, initialState);
 
-  // Check for existing authentication on app start (noop for now)
-  useEffect(() => {}, []);
+  // Check for existing authentication on app start
+  useEffect(() => {
+    checkAuthStatus();
+
+    // Listen to auth state changes
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (event === 'SIGNED_OUT') {
+        dispatch({ type: 'SET_USER', payload: null });
+        await AsyncStorage.removeItem('user');
+      } else if (event === 'SIGNED_IN' && session) {
+        // Refresh user data on sign in
+        await checkAuthStatus();
+      }
+    });
+
+    return () => {
+      authListener?.subscription.unsubscribe();
+    };
+  }, []);
 
   const checkAuthStatus = async () => {
     try {
-      const userData = await AsyncStorage.getItem('user');
-      if (userData) {
-        const user = JSON.parse(userData);
-        dispatch({ type: 'SET_USER', payload: user });
-      } else {
-        dispatch({ type: 'SET_LOADING', payload: false });
-      }
-    } catch (error) {
-      console.error('Error checking auth status:', error);
-      dispatch({ type: 'SET_LOADING', payload: false });
-    }
-  };
-
-  const login = async (credentials: LoginCredentials) => {
-    try {
       dispatch({ type: 'SET_LOADING', payload: true });
-      dispatch({ type: 'CLEAR_ERROR' });
-
-      // Simulate API call - replace with actual authentication
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Mock user data based on email
-      let user: Customer | Shop;
       
-      if (credentials.email.includes('shop')) {
+      // Check Supabase session
+      const { data: { user: authUser } } = await supabase.auth.getUser();
+      
+      if (!authUser) {
+        // No authenticated user, ensure we're logged out
+        dispatch({ type: 'SET_USER', payload: null });
+        dispatch({ type: 'SET_LOADING', payload: false });
+        return;
+      }
+
+      // Get full user profile
+      const { user: userData, profile } = await getCurrentUser();
+
+      if (!userData) {
+        // No user data, ensure we're logged out
+        dispatch({ type: 'SET_USER', payload: null });
+        dispatch({ type: 'SET_LOADING', payload: false });
+        return;
+      }
+
+      // Convert to app User type
+      let user: Customer | Shop;
+
+      if (userData.user_type === 'shop') {
         user = {
-          id: 'shop-1',
-          email: credentials.email,
-          name: 'John\'s Bakery',
+          id: userData.id,
+          email: userData.email,
+          name: userData.name || userData.email?.split('@')[0] || 'User',
           userType: UserType.SHOP,
-          createdAt: new Date('2024-01-01'),
-          lastLoginAt: new Date(),
+          createdAt: new Date(userData.created_at),
+          lastLoginAt: new Date(userData.last_login_at || userData.created_at),
           isActive: true,
           businessInfo: {
-            businessName: 'John\'s Bakery',
-            businessType: 'Bakery',
-            description: 'Fresh baked goods daily',
-            phoneNumber: '+94 77 123 4567',
+            businessName: profile?.business_name || 'Demo Shop',
+            businessType: profile?.business_type || 'Restaurant',
+            description: profile?.description || '',
+            phoneNumber: userData.phone_number || '',
           },
           location: {
-            address: '123 Main Street',
-            city: 'Colombo',
-            postalCode: '00100',
-            coordinates: { lat: 6.9271, lng: 79.8612 },
+            address: profile?.address || '',
+            city: profile?.city || 'Colombo',
+            postalCode: profile?.postal_code || '',
+            coordinates: { lat: 0, lng: 0 },
           },
-          operatingHours: {
-            monday: { open: '07:00', close: '19:00', isOpen: true },
-            tuesday: { open: '07:00', close: '19:00', isOpen: true },
-            wednesday: { open: '07:00', close: '19:00', isOpen: true },
-            thursday: { open: '07:00', close: '19:00', isOpen: true },
-            friday: { open: '07:00', close: '19:00', isOpen: true },
-            saturday: { open: '08:00', close: '18:00', isOpen: true },
-            sunday: { open: '09:00', close: '17:00', isOpen: true },
-          },
+          operatingHours: profile?.operating_hours || {},
           verificationStatus: {
-            isVerified: true,
-            verifiedAt: new Date('2024-01-15'),
+            isVerified: profile?.is_verified || false,
+            verifiedAt: profile?.verified_at ? new Date(profile.verified_at) : undefined,
           },
           rating: {
-            average: 4.5,
-            totalReviews: 127,
+            average: profile?.average_rating || 0,
+            totalReviews: profile?.total_reviews || 0,
           },
           settings: {
             autoPostBags: false,
@@ -133,22 +139,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } as Shop;
       } else {
         user = {
-          id: 'customer-1',
-          email: credentials.email,
-          name: 'Jane Doe',
+          id: userData.id,
+          email: userData.email,
+          name: userData.name || userData.email?.split('@')[0] || 'User',
           userType: UserType.CUSTOMER,
-          createdAt: new Date('2024-01-01'),
-          lastLoginAt: new Date(),
+          createdAt: new Date(userData.created_at),
+          lastLoginAt: new Date(userData.last_login_at || userData.created_at),
           isActive: true,
-          phoneNumber: '+94 77 987 6543',
-          address: {
-            street: '456 Oak Avenue',
-            city: 'Colombo',
-            postalCode: '00300',
-            coordinates: { lat: 6.9271, lng: 79.8612 },
-          },
+          phoneNumber: userData.phone_number || '',
           preferences: {
-            favoriteCategories: ['meals', 'bread_pastries'],
+            favoriteCategories: profile?.dietary_preferences || [],
             maxDistance: 5,
             notifications: true,
           },
@@ -160,7 +160,113 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await AsyncStorage.setItem('user', JSON.stringify(user));
       dispatch({ type: 'SET_USER', payload: user });
     } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: 'Login failed. Please try again.' });
+      console.error('Error checking auth status:', error);
+      // On error, ensure we're logged out
+      dispatch({ type: 'SET_USER', payload: null });
+      dispatch({ type: 'SET_LOADING', payload: false });
+    }
+  };
+
+  const login = async (credentials: LoginCredentials) => {
+    try {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      dispatch({ type: 'CLEAR_ERROR' });
+
+      // Use Supabase authentication
+      const { user: authUser, error: authError } = await signInUser(credentials.email, credentials.password);
+
+      if (authError || !authUser) {
+        throw new Error(authError?.message || 'Login failed. Please check your credentials.');
+      }
+
+      // Get full user profile
+      const { user: userData, profile, error: profileError } = await getCurrentUser();
+
+      if (profileError) {
+        console.error('Profile error:', profileError);
+        throw new Error('Failed to load user profile.');
+      }
+
+      if (!userData) {
+        console.error('No user data returned from getCurrentUser');
+        throw new Error('Failed to load user profile.');
+      }
+
+      console.log('Login successful, user data:', userData);
+
+      // Convert Supabase data to app User type
+      let user: Customer | Shop;
+
+      if (userData.user_type === 'shop') {
+        user = {
+          id: userData.id,
+          email: userData.email,
+          name: userData.name || userData.email?.split('@')[0] || 'User',
+          userType: UserType.SHOP,
+          createdAt: new Date(userData.created_at),
+          lastLoginAt: new Date(userData.last_login_at || userData.created_at),
+          isActive: true,
+          businessInfo: {
+            businessName: profile?.business_name || 'Demo Shop',
+            businessType: profile?.business_type || 'Restaurant',
+            description: profile?.description || '',
+            phoneNumber: userData.phone_number || '',
+          },
+          location: {
+            address: profile?.address || '',
+            city: profile?.city || 'Colombo',
+            postalCode: profile?.postal_code || '',
+            coordinates: { lat: 0, lng: 0 }, // Parse from coordinates field if needed
+          },
+          operatingHours: profile?.operating_hours || {},
+          verificationStatus: {
+            isVerified: profile?.is_verified || false,
+            verifiedAt: profile?.verified_at ? new Date(profile.verified_at) : undefined,
+          },
+          rating: {
+            average: profile?.average_rating || 0,
+            totalReviews: profile?.total_reviews || 0,
+          },
+          settings: {
+            autoPostBags: false,
+            defaultBagQuantity: 5,
+            defaultDiscountPercentage: 60,
+            notificationSettings: {
+              newOrders: true,
+              lowStock: true,
+              reviews: true,
+            },
+          },
+        } as Shop;
+      } else {
+        user = {
+          id: userData.id,
+          email: userData.email,
+          name: userData.name || userData.email?.split('@')[0] || 'User',
+          userType: UserType.CUSTOMER,
+          createdAt: new Date(userData.created_at),
+          lastLoginAt: new Date(userData.last_login_at || userData.created_at),
+          isActive: true,
+          phoneNumber: userData.phone_number || '',
+          preferences: {
+            favoriteCategories: profile?.dietary_preferences || [],
+            maxDistance: 5,
+            notifications: true,
+          },
+          orderHistory: [],
+          favoriteShops: [],
+        } as Customer;
+      }
+
+      console.log('Final user object before storage:', user);
+      console.log('User type being set:', user.userType);
+      await AsyncStorage.setItem('user', JSON.stringify(user));
+      dispatch({ type: 'SET_USER', payload: user });
+      console.log('User state updated successfully with userType:', user.userType);
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Login failed. Please try again.';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
     }
   };
 
@@ -169,31 +275,61 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'CLEAR_ERROR' });
 
-      // Simulate API call - replace with actual registration
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Use Supabase to sign up
+      const signupData: any = {
+        email: credentials.email,
+        password: credentials.password,
+        name: credentials.name,
+        user_type: credentials.userType === UserType.SHOP ? 'shop' : 'customer',
+        phone_number: credentials.businessInfo?.phoneNumber,
+      };
 
+      if (credentials.userType === UserType.SHOP && credentials.businessInfo) {
+        signupData.business_info = {
+          business_name: credentials.businessInfo.businessName,
+          business_type: credentials.businessInfo.businessType,
+          address: '',
+          city: 'Colombo',
+          coordinates: { lat: 6.9271, lng: 79.8612 },
+        };
+      }
+
+      const { user: newUser, error: signupError } = await signUpUser(signupData);
+
+      if (signupError || !newUser) {
+        throw new Error(signupError?.message || 'Signup failed. Please try again.');
+      }
+
+      // After signup, get the current user data
+      const { user: userData, profile } = await getCurrentUser();
+
+      if (!userData) {
+        throw new Error('Failed to load user profile after signup.');
+      }
+
+      // Convert to app User type
       let user: Customer | Shop;
       const now = new Date();
 
-      if (credentials.userType === UserType.SHOP && credentials.businessInfo) {
+      if (userData.user_type === 'shop') {
         user = {
-          id: `shop-${Date.now()}`,
-          email: credentials.email,
-          name: credentials.businessInfo.businessName,
+          id: userData.id,
+          email: userData.email,
+          name: userData.name || userData.email?.split('@')[0] || 'User',
           userType: UserType.SHOP,
-          createdAt: now,
+          createdAt: new Date(userData.created_at),
           lastLoginAt: now,
           isActive: true,
           businessInfo: {
-            businessName: credentials.businessInfo.businessName,
-            businessType: credentials.businessInfo.businessType,
-            description: '',
-            phoneNumber: credentials.businessInfo.phoneNumber,
+            businessName: profile?.business_name || 'Demo Shop',
+            businessType: profile?.business_type || 'Restaurant',
+            description: profile?.description || '',
+            phoneNumber: userData.phone_number || '',
           },
           location: {
-            address: '',
-            city: 'Colombo',
-            postalCode: '',
+            address: profile?.address || '',
+            city: profile?.city || 'Colombo',
+            postalCode: profile?.postal_code || '',
             coordinates: { lat: 6.9271, lng: 79.8612 },
           },
           operatingHours: {},
@@ -217,13 +353,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         } as Shop;
       } else {
         user = {
-          id: `customer-${Date.now()}`,
-          email: credentials.email,
-          name: credentials.name,
+          id: userData.id,
+          email: userData.email,
+          name: userData.name || userData.email?.split('@')[0] || 'User',
           userType: UserType.CUSTOMER,
-          createdAt: now,
+          createdAt: new Date(userData.created_at),
           lastLoginAt: now,
           isActive: true,
+          phoneNumber: userData.phone_number || '',
           preferences: {
             favoriteCategories: [],
             maxDistance: 5,
@@ -236,17 +373,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       await AsyncStorage.setItem('user', JSON.stringify(user));
       dispatch({ type: 'SET_USER', payload: user });
-    } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: 'Signup failed. Please try again.' });
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Signup failed. Please try again.';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
     }
   };
 
   const logout = async () => {
     try {
+      await signOutUser();
       await AsyncStorage.removeItem('user');
       dispatch({ type: 'SET_USER', payload: null });
+      dispatch({ type: 'SET_LOADING', payload: false });
     } catch (error) {
       console.error('Error logging out:', error);
+      // Even if logout fails, clear the user state
+      dispatch({ type: 'SET_USER', payload: null });
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   };
 

@@ -1,33 +1,49 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect, useRootNavigationState } from 'expo-router';
 import { useAuth } from '@/contexts/AuthContext';
 import { UserType } from '@/types/User';
 
 export default function IndexScreen() {
   const { isAuthenticated, user, isLoading } = useAuth();
-  const router = useRouter();
+  const navigationState = useRootNavigationState();
 
-  useEffect(() => {
-    if (!isLoading) {
-      if (isAuthenticated && user) {
-        if (user.userType === UserType.SHOP) {
-          router.replace('/(shop-tabs)/dashboard');
-        } else {
-          router.replace('/(tabs)/index');
-        }
-      } else {
-        router.replace('/auth/login');
-      }
-    }
-  }, [isAuthenticated, user, isLoading, router]);
+  // Debug logging
+  console.log('Index screen state:', { 
+    isLoading, 
+    isAuthenticated, 
+    user: user ? { id: user.id, userType: user.userType } : null,
+    navigationReady: !!navigationState?.key 
+  });
 
-  // Show loading screen while checking authentication
-  return (
-    <View style={styles.container}>
-      <Text style={styles.loadingText}>Loading...</Text>
-    </View>
-  );
+  // Wait until the root navigation is ready
+  if (!navigationState?.key) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.loadingText}>Loading navigation...</Text>
+      </View>
+    );
+  }
+
+  // Wait for authentication check to complete
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.loadingText}>Checking authentication...</Text>
+      </View>
+    );
+  }
+
+  // Redirect based on authentication status
+  if (isAuthenticated && user) {
+    const redirectPath = user.userType === UserType.SHOP ? '/(shop-tabs)/dashboard' : '/(tabs)/';
+    console.log('Redirecting authenticated user to:', redirectPath);
+    return <Redirect href={redirectPath as any} />;
+  }
+
+  // Redirect unauthenticated users to login
+  console.log('Redirecting unauthenticated user to login');
+  return <Redirect href="/auth/login" />;
 }
 
 const styles = StyleSheet.create({

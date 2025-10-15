@@ -1,5 +1,7 @@
 import React from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -12,6 +14,7 @@ export default function ProfileScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { user, logout } = useAuth();
+  const router = useRouter();
   
   const customer = user?.userType === 'customer' ? (user as Customer) : null;
 
@@ -53,7 +56,18 @@ export default function ProfileScreen() {
             { 
               text: 'Logout', 
               style: 'destructive',
-              onPress: logout
+              onPress: async () => {
+                console.log('Logging out customer...');
+                try {
+                  await logout();
+                  console.log('Customer logout successful, redirecting to login...');
+                  router.replace('/auth/login');
+                } catch (error) {
+                  console.error('Customer logout error:', error);
+                  // Force redirect to login even if logout fails
+                  router.replace('/auth/login');
+                }
+              }
             },
           ]
         );
@@ -62,8 +76,9 @@ export default function ProfileScreen() {
   ];
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Header */}
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
+        {/* Header */}
       <ThemedView style={styles.header}>
         <ThemedText style={[styles.headerTitle, { color: colors.text }]}>Profile</ThemedText>
       </ThemedView>
@@ -130,12 +145,16 @@ export default function ProfileScreen() {
         </ThemedText>
         <ThemedText style={[styles.appVersion, { color: colors.onSurface }]}>Version 1.0.0</ThemedText>
       </ThemedView>
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  scrollView: {
     flex: 1,
   },
   header: {

@@ -1,22 +1,39 @@
 import { createClient } from '@supabase/supabase-js'
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import Constants from 'expo-constants'
 import type { Database } from '@/types/Database'
 
-// Supabase configuration
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL!
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY!
+// Supabase configuration with fallbacks
+const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 
+                   Constants.expoConfig?.extra?.supabaseUrl || 
+                   'https://bblcyyqmwmbovkecxuqz.supabase.co'
+
+const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 
+                       Constants.expoConfig?.extra?.supabaseAnonKey || 
+                       'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJibGN5eXFtd21ib3ZrZWN4dXF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTkzMDc0MjMsImV4cCI6MjA3NDg4MzQyM30.WzIcxOdp41VzwE0Udl8vh6KK2DQXYFJMsHFG9X5-5E4'
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error('Missing Supabase environment variables. Please check your .env file.')
 }
 
 // Create Supabase client with proper typing
+// Note: On web (SSR), `window` is not available. Avoid using AsyncStorage in that context.
+const isBrowser = typeof window !== 'undefined'
+
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: AsyncStorage,
-    autoRefreshToken: true,
-    persistSession: true,
+    storage: isBrowser ? AsyncStorage : undefined,
+    autoRefreshToken: isBrowser,
+    persistSession: isBrowser,
     detectSessionInUrl: false,
+  },
+  db: {
+    schema: 'public',
+  },
+  global: {
+    headers: {
+      Accept: 'application/json',
+    },
   },
 })
 
@@ -34,24 +51,67 @@ export async function getCurrentUser() {
     }
 
     // Get user profile based on user type
-    const { data: userData, error: userError } = await supabase
+    let { data: userData, error: userError } = await supabase
       .from('users')
       .select('*')
       .eq('id', user.id)
-      .single()
+      .maybeSingle()
+
+    if (!userData) {
+      // Create a minimal users row on first login
+      const { error: insertErr } = await supabase
+        .from('users')
+        .insert({
+          id: user.id,
+          email: user.email,
+          name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
+          user_type: (user.user_metadata as any)?.user_type || 'customer',
+          phone_number: (user.user_metadata as any)?.phone_number || null,
+          password_hash: '',
+        })
+      if (!insertErr) {
+        const { data: fetched } = await supabase
+          .from('users')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle()
+        userData = fetched || null
+      }
+    } else if (!userData.name || userData.name.trim() === '') {
+      // Update existing user with empty name
+      const defaultName = userData.email?.split('@')[0] || 'User';
+      await supabase
+        .from('users')
+        .update({ name: defaultName })
+        .eq('id', user.id)
+      
+      userData.name = defaultName;
+    }
 
     if (userError || !userData) {
-      return { user: null, profile: null, error: userError }
+      return { user: null, profile: null, error: userError || new Error('User record not found or could not be created') }
     }
 
     let profile = null
     if (userData.user_type === 'customer') {
-      const { data: customerProfile, error: profileError } = await supabase
+      let { data: customerProfile, error: profileError } = await supabase
         .from('customer_profiles')
         .select('*')
         .eq('id', user.id)
-        .single()
+        .maybeSingle()
       
+      if (!customerProfile) {
+        // Create minimal customer profile if missing
+        await supabase
+          .from('customer_profiles')
+          .upsert({ id: user.id }, { onConflict: 'id', ignoreDuplicates: true })
+        const { data: fetchedProfile } = await supabase
+          .from('customer_profiles')
+          .select('*')
+          .eq('id', user.id)
+          .maybeSingle()
+        customerProfile = fetchedProfile || null
+      }
       if (!profileError) {
         profile = customerProfile
       }
@@ -60,7 +120,7 @@ export async function getCurrentUser() {
         .from('shop_profiles')
         .select('*')
         .eq('id', user.id)
-        .single()
+        .maybeSingle()
       
       if (!profileError) {
         profile = shopProfile
