@@ -17,14 +17,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 // Create Supabase client with proper typing
-// Note: On web (SSR), `window` is not available. Avoid using AsyncStorage in that context.
-const isBrowser = typeof window !== 'undefined'
+// In React Native we should use AsyncStorage for session persistence.
+const isReactNative = typeof navigator !== 'undefined' && navigator.product === 'ReactNative'
 
 export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: isBrowser ? AsyncStorage : undefined,
-    autoRefreshToken: isBrowser,
-    persistSession: isBrowser,
+    storage: isReactNative ? AsyncStorage : undefined,
+    autoRefreshToken: true,
+    persistSession: true,
     detectSessionInUrl: false,
   },
   db: {
@@ -50,33 +50,49 @@ export async function getCurrentUser() {
       return { user: null, profile: null, error: authError }
     }
 
-    // Get user profile based on user type
+    // Get user profile based on user type - try by ID first, then by email
+    console.log('Looking for user with ID:', user.id)
     let { data: userData, error: userError } = await supabase
       .from('users')
       .select('*')
       .eq('id', user.id)
       .maybeSingle()
 
-    if (!userData) {
-      // Create a minimal users row on first login
-      const { error: insertErr } = await supabase
+    console.log('User found by ID:', userData ? 'YES' : 'NO', userError ? `Error: ${userError.message}` : '')
+
+    // If not found by ID, try by email (in case of ID mismatch)
+    if (!userData && user.email) {
+      console.log('Trying to find user by email:', user.email)
+      const { data: userByEmail, error: emailError } = await supabase
         .from('users')
-        .insert({
-          id: user.id,
-          email: user.email,
-          name: user.user_metadata?.name || user.email?.split('@')[0] || 'User',
-          user_type: (user.user_metadata as any)?.user_type || 'customer',
-          phone_number: (user.user_metadata as any)?.phone_number || null,
-          password_hash: '',
-        })
-      if (!insertErr) {
-        const { data: fetched } = await supabase
-          .from('users')
-          .select('*')
-          .eq('id', user.id)
-          .maybeSingle()
-        userData = fetched || null
+        .select('*')
+        .eq('email', user.email)
+        .maybeSingle()
+      
+      console.log('User found by email:', userByEmail ? 'YES' : 'NO', emailError ? `Error: ${emailError.message}` : '')
+      
+      if (userByEmail) {
+        userData = userByEmail
+        userError = null
+        console.log('Using user data found by email:', userData.name)
       }
+    }
+
+    if (!userData) {
+      // Fallback: use RPC that bypasses RLS and guarantees creation + return
+      const { data: rpcData, error: rpcError } = await supabase.rpc('create_user_safe', {
+        p_id: user.id,
+        p_email: user.email,
+        p_name: (user.user_metadata as any)?.name || user.email?.split('@')[0] || 'User',
+        p_user_type: (user.user_metadata as any)?.user_type || 'customer',
+        p_phone_number: (user.user_metadata as any)?.phone_number || null,
+      })
+
+      if (rpcError) {
+        return { user: null, profile: null, error: rpcError }
+      }
+
+      userData = rpcData || null
     } else if (!userData.name || userData.name.trim() === '') {
       // Update existing user with empty name
       const defaultName = userData.email?.split('@')[0] || 'User';
@@ -102,14 +118,24 @@ export async function getCurrentUser() {
       
       if (!customerProfile) {
         // Create minimal customer profile if missing
-        await supabase
+        const { error: createProfileError } = await supabase
           .from('customer_profiles')
           .upsert({ id: user.id }, { onConflict: 'id', ignoreDuplicates: true })
-        const { data: fetchedProfile } = await supabase
+        
+        if (createProfileError) {
+          console.error('Error creating customer profile:', createProfileError);
+        }
+        
+        const { data: fetchedProfile, error: fetchError } = await supabase
           .from('customer_profiles')
           .select('*')
           .eq('id', user.id)
           .maybeSingle()
+        
+        if (fetchError) {
+          console.error('Error fetching customer profile:', fetchError);
+        }
+        
         customerProfile = fetchedProfile || null
       }
       if (!profileError) {
@@ -122,7 +148,9 @@ export async function getCurrentUser() {
         .eq('id', user.id)
         .maybeSingle()
       
-      if (!profileError) {
+      if (profileError) {
+        console.error('Error fetching shop profile:', profileError);
+      } else {
         profile = shopProfile
       }
     }
@@ -156,7 +184,10 @@ export async function signUpUser(data: {
   }
 }) {
   try {
-    // Create auth user
+    // Step 1: Create auth user first
+    const emailRedirectTo = process.env.EXPO_PUBLIC_EMAIL_REDIRECT_TO ||
+      (Constants.expoConfig as any)?.extra?.emailRedirectTo
+
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email: data.email,
       password: data.password,
@@ -164,7 +195,9 @@ export async function signUpUser(data: {
         data: {
           name: data.name,
           user_type: data.user_type,
-        }
+          phone_number: data.phone_number,
+        },
+        emailRedirectTo: emailRedirectTo || undefined,
       }
     })
 
@@ -172,51 +205,45 @@ export async function signUpUser(data: {
       return { user: null, error: authError }
     }
 
-    // Create user record
-    const { error: userError } = await supabase
-      .from('users')
-      .insert({
-        id: authData.user.id,
-        email: data.email,
-        name: data.name,
-        user_type: data.user_type,
-        phone_number: data.phone_number,
-        password_hash: '', // This will be handled by Supabase Auth
-      })
-
-    if (userError) {
-      return { user: null, error: userError }
+    // If email confirmation is enabled, there may be no active session yet
+    if (!authData.session) {
+      // Do NOT create DB rows yet; require email verification first
+      return { user: authData.user, error: new Error('EMAIL_CONFIRMATION_REQUIRED') }
     }
 
-    // Create profile based on user type
-    if (data.user_type === 'customer') {
-      const { error: profileError } = await supabase
-        .from('customer_profiles')
-        .insert({
-          id: authData.user.id,
-        })
+    // Step 2: Wait a moment for the session to be established (defensive)
+    await new Promise(resolve => setTimeout(resolve, 100))
 
-      if (profileError) {
-        return { user: null, error: profileError }
-      }
-    } else if (data.user_type === 'shop' && data.business_info) {
-      const { error: profileError } = await supabase
-        .from('shop_profiles')
-        .insert({
-          id: authData.user.id,
-          business_name: data.business_info.business_name,
-          business_type: data.business_info.business_type,
-          address: data.business_info.address,
-          city: data.business_info.city,
-          coordinates: `POINT(${data.business_info.coordinates.lng} ${data.business_info.coordinates.lat})`,
-        })
+    // Step 3: Create user record using RPC function (bypasses RLS and returns data)
+    console.log('Creating user record using RPC function for ID:', authData.user.id)
+    const { data: userDataJson, error: rpcError } = await supabase.rpc('create_user_safe', {
+      p_id: authData.user.id,
+      p_email: data.email,
+      p_name: data.name,
+      p_user_type: data.user_type,
+      p_phone_number: data.phone_number || null,
+    })
 
-      if (profileError) {
-        return { user: null, error: profileError }
-      }
+    if (rpcError) {
+      console.error('Error calling create_user_safe RPC:', rpcError)
+      console.error('User ID:', authData.user.id)
+      console.error('Email:', data.email)
+      return { user: null, error: rpcError }
     }
 
-    return { user: authData.user, error: null }
+    if (!userDataJson) {
+      console.error('RPC function returned no data for ID:', authData.user.id)
+      return { user: null, error: new Error('User creation failed - no data returned') }
+    }
+
+    console.log('User record created and data retrieved via RPC for ID:', authData.user.id)
+    console.log('User data:', userDataJson)
+
+      // Step 5: Create profile based on user type
+      // NOTE: The RPC function already creates the profile, so we don't need to do it again
+      // This was causing duplicate key errors
+
+    return { user: authData.user, userData: userDataJson, error: null }
   } catch (error) {
     console.error('Error signing up user:', error)
     return { user: null, error }

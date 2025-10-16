@@ -294,17 +294,59 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         };
       }
 
-      const { user: newUser, error: signupError } = await signUpUser(signupData);
+      const { user: newUser, userData: signupUserData, error: signupError } = await signUpUser(signupData);
 
       if (signupError || !newUser) {
+        // Handle specific error cases
+        if (signupError?.message === 'EMAIL_CONFIRMATION_REQUIRED') {
+          dispatch({ type: 'SET_LOADING', payload: false });
+          throw new Error('We sent a verification link to your email. Please verify to continue.');
+        }
+        if (signupError?.message?.includes('duplicate key value violates unique constraint')) {
+          throw new Error('This email is already registered. Please use a different email or try logging in.');
+        }
         throw new Error(signupError?.message || 'Signup failed. Please try again.');
       }
 
-      // After signup, get the current user data
-      const { user: userData, profile } = await getCurrentUser();
+      // If confirmation is enabled, signUp returned EMAIL_CONFIRMATION_REQUIRED already.
+      // Otherwise, continue to create data and log user in.
 
+      // Use the user data returned from the signup function
+      const userData = signupUserData;
+      
       if (!userData) {
-        throw new Error('Failed to load user profile after signup.');
+        console.error('No user data returned from signup for user ID:', newUser.id);
+        throw new Error('User account was created but data could not be loaded. Please try logging in.');
+      }
+      
+      console.log('User data available from signup:', userData);
+
+      // Get profile data
+      let profile = null;
+      if (userData.user_type === 'customer') {
+        const { data: customerProfile, error: profileError } = await supabase
+          .from('customer_profiles')
+          .select('*')
+          .eq('id', newUser.id)
+          .maybeSingle();
+        
+        if (profileError) {
+          console.error('Error fetching customer profile after signup:', profileError);
+        } else {
+          profile = customerProfile;
+        }
+      } else if (userData.user_type === 'shop') {
+        const { data: shopProfile, error: profileError } = await supabase
+          .from('shop_profiles')
+          .select('*')
+          .eq('id', newUser.id)
+          .maybeSingle();
+        
+        if (profileError) {
+          console.error('Error fetching shop profile after signup:', profileError);
+        } else {
+          profile = shopProfile;
+        }
       }
 
       // Convert to app User type
