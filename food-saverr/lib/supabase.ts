@@ -86,6 +86,12 @@ export async function getCurrentUser() {
         p_name: (user.user_metadata as any)?.name || user.email?.split('@')[0] || 'User',
         p_user_type: (user.user_metadata as any)?.user_type || 'customer',
         p_phone_number: (user.user_metadata as any)?.phone_number || null,
+        p_business_name: null,
+        p_business_type: null,
+        p_business_address: null,
+        p_business_city: null,
+        p_business_lat: null,
+        p_business_lng: null,
       })
 
       if (rpcError) {
@@ -222,6 +228,12 @@ export async function signUpUser(data: {
       p_name: data.name,
       p_user_type: data.user_type,
       p_phone_number: data.phone_number || null,
+      p_business_name: data.business_info?.business_name || null,
+      p_business_type: data.business_info?.business_type || null,
+      p_business_address: data.business_info?.address || null,
+      p_business_city: data.business_info?.city || null,
+      p_business_lat: data.business_info?.coordinates?.lat || null,
+      p_business_lng: data.business_info?.coordinates?.lng || null,
     })
 
     if (rpcError) {

@@ -24,6 +24,7 @@ export default function SignupScreen() {
   const [userType, setUserType] = useState<UserType>(UserType.CUSTOMER);
   const [businessName, setBusinessName] = useState('');
   const [businessType, setBusinessType] = useState('');
+  const [showBusinessTypeDropdown, setShowBusinessTypeDropdown] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   
@@ -33,7 +34,15 @@ export default function SignupScreen() {
   const colors = Colors[colorScheme ?? 'light'];
 
   const handleSignup = async () => {
-    if (!email.trim() || !password.trim() || !name.trim()) {
+    // Check basic required fields
+    if (!email.trim() || !password.trim()) {
+      Alert.alert('Error', 'Please fill in all required fields');
+      return;
+    }
+
+    // Check name/business name based on user type
+    const displayName = userType === UserType.SHOP ? businessName : name;
+    if (!displayName.trim()) {
       Alert.alert('Error', 'Please fill in all required fields');
       return;
     }
@@ -48,7 +57,7 @@ export default function SignupScreen() {
       return;
     }
 
-    if (userType === UserType.SHOP && (!businessName.trim() || !businessType.trim() || !phoneNumber.trim())) {
+    if (userType === UserType.SHOP && (!businessName.trim() || !businessType || !phoneNumber.trim())) {
       Alert.alert('Error', 'Please fill in all business information');
       return;
     }
@@ -58,11 +67,11 @@ export default function SignupScreen() {
       await signup({
         email: email.trim(),
         password,
-        name: name.trim(),
+        name: userType === UserType.SHOP ? businessName.trim() : name.trim(),
         userType,
         businessInfo: userType === UserType.SHOP ? {
           businessName: businessName.trim(),
-          businessType: businessType.trim(),
+          businessType: businessType,
           phoneNumber: phoneNumber.trim(),
         } : undefined,
       });
@@ -87,7 +96,11 @@ export default function SignupScreen() {
           </Text>
         </View>
 
-        <View style={styles.form}>
+        <TouchableOpacity 
+          style={styles.form} 
+          activeOpacity={1} 
+          onPress={() => setShowBusinessTypeDropdown(false)}
+        >
           <View style={styles.userTypeContainer}>
             <Text style={[styles.label, { color: colors.text }]}>Account Type</Text>
             <View style={styles.userTypeButtons}>
@@ -141,8 +154,8 @@ export default function SignupScreen() {
                   color: colors.text,
                 },
               ]}
-              value={name}
-              onChangeText={setName}
+              value={userType === UserType.SHOP ? businessName : name}
+              onChangeText={userType === UserType.SHOP ? setBusinessName : setName}
               placeholder={userType === UserType.SHOP ? 'Enter business name' : 'Enter your full name'}
               placeholderTextColor={colors.tabIconDefault}
               autoCapitalize="words"
@@ -153,21 +166,56 @@ export default function SignupScreen() {
             <>
               <View style={styles.inputContainer}>
                 <Text style={[styles.label, { color: colors.text }]}>Business Type *</Text>
-                <TextInput
+                <TouchableOpacity
                   style={[
-                    styles.input,
+                    styles.dropdownButton,
                     {
                       backgroundColor: colors.background,
                       borderColor: colors.border,
-                      color: colors.text,
                     },
                   ]}
-                  value={businessType}
-                  onChangeText={setBusinessType}
-                  placeholder="e.g., Bakery, Restaurant, Grocery Store"
-                  placeholderTextColor={colors.tabIconDefault}
-                  autoCapitalize="words"
-                />
+                  onPress={() => setShowBusinessTypeDropdown(!showBusinessTypeDropdown)}
+                >
+                  <Text style={[styles.dropdownButtonText, { color: colors.text }]}>
+                    {businessType ? businessType.charAt(0).toUpperCase() + businessType.slice(1).replace('_', ' ') : 'Select Business Type'}
+                  </Text>
+                  <Text style={[styles.dropdownArrow, { color: colors.text }]}>
+                    {showBusinessTypeDropdown ? '▲' : '▼'}
+                  </Text>
+                </TouchableOpacity>
+                
+                {showBusinessTypeDropdown && (
+                  <View style={[
+                    styles.dropdownList,
+                    {
+                      backgroundColor: colors.background,
+                      borderColor: colors.border,
+                    },
+                  ]}>
+                    {['bakery', 'restaurant', 'grocery_store', 'hotel'].map((type) => (
+                      <TouchableOpacity
+                        key={type}
+                        style={[
+                          styles.dropdownItem,
+                          { borderBottomColor: colors.border },
+                          businessType === type && { backgroundColor: colors.tint + '20' }
+                        ]}
+                        onPress={() => {
+                          setBusinessType(type);
+                          setShowBusinessTypeDropdown(false);
+                        }}
+                      >
+                        <Text style={[
+                          styles.dropdownItemText,
+                          { color: colors.text },
+                          businessType === type && { color: colors.tint, fontWeight: '600' }
+                        ]}>
+                          {type.charAt(0).toUpperCase() + type.slice(1).replace('_', ' ')}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
 
               <View style={styles.inputContainer}>
@@ -278,7 +326,7 @@ export default function SignupScreen() {
               <Text style={[styles.linkText, { color: colors.tint }]}>Sign In</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </TouchableOpacity>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -340,6 +388,43 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     padding: 16,
+    fontSize: 16,
+  },
+  dropdownButton: {
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    minHeight: 50,
+  },
+  dropdownButtonText: {
+    fontSize: 16,
+    flex: 1,
+  },
+  dropdownArrow: {
+    fontSize: 12,
+    marginLeft: 8,
+  },
+  dropdownList: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderRadius: 12,
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
+    zIndex: 1000,
+    marginTop: -1,
+  },
+  dropdownItem: {
+    padding: 16,
+    borderBottomWidth: 1,
+  },
+  dropdownItemText: {
     fontSize: 16,
   },
   errorText: {
