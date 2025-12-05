@@ -18,7 +18,18 @@ export const LocationDisplay: React.FC<LocationDisplayProps> = ({
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
 
-  const formatCoordinates = (lat: number, lng: number) => {
+  const formatLocation = (
+    lat: number,
+    lng: number,
+    city?: string,
+    country?: string
+  ) => {
+    if (city || country) {
+      const cityPart = city ? city : '';
+      const countryPart = country ? country : '';
+      const sep = cityPart && countryPart ? ', ' : '';
+      return `${cityPart}${sep}${countryPart}`.trim();
+    }
     return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
   };
 
@@ -30,18 +41,18 @@ export const LocationDisplay: React.FC<LocationDisplayProps> = ({
           {loading ? (
             <Text style={[styles.text, { color: colors.text }]}>Getting location...</Text>
           ) : error ? (
-            <Text style={[styles.errorText, { color: colors.error }]}>{error}</Text>
+            <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
           ) : location ? (
             <>
               <Text style={[styles.text, { color: colors.text }]}>Current Location</Text>
               <Text style={[styles.coordinates, { color: colors.onSurface }]}>
-                {formatCoordinates(location.latitude, location.longitude)}
+                {formatLocation(
+                  location.latitude,
+                  location.longitude,
+                  location.city,
+                  location.country
+                )}
               </Text>
-              {location.accuracy && (
-                <Text style={[styles.accuracy, { color: colors.onSurface }]}>
-                  Accuracy: ±{Math.round(location.accuracy)}m
-                </Text>
-              )}
             </>
           ) : (
             <Text style={[styles.text, { color: colors.text }]}>No location available</Text>

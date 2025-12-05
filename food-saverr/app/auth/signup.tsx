@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,6 +15,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { UserType } from '@/types/User';
+import { validatePassword } from '@/lib/passwordPolicy';
 
 export default function SignupScreen() {
   const [email, setEmail] = useState('');
@@ -27,11 +28,28 @@ export default function SignupScreen() {
   const [showBusinessTypeDropdown, setShowBusinessTypeDropdown] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   
-  const { signup, error } = useAuth();
+  const { signup, error, clearError } = useAuth();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+
+  // Clear error when component mounts
+  useEffect(() => {
+    clearError();
+    setLocalError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
+
+  // Sync context error to local error for display
+  useEffect(() => {
+    if (error) {
+      setLocalError(error);
+    } else {
+      setLocalError(null);
+    }
+  }, [error]);
 
   const handleSignup = async () => {
     // Check basic required fields
@@ -52,8 +70,11 @@ export default function SignupScreen() {
       return;
     }
 
-    if (password.length < 6) {
-      Alert.alert('Error', 'Password must be at least 6 characters');
+    const passwordValidation = validatePassword(password);
+    if (!passwordValidation.valid) {
+      const message = passwordValidation.message || 'Password does not meet the requirements.';
+      setLocalError(message);
+      Alert.alert('Error', message);
       return;
     }
 
@@ -63,6 +84,8 @@ export default function SignupScreen() {
     }
 
     setIsLoading(true);
+    setLocalError(null); // Clear any previous errors
+    clearError(); // Clear context error
     try {
       await signup({
         email: email.trim(),
@@ -77,7 +100,7 @@ export default function SignupScreen() {
       });
       // Navigation will be handled by the auth state change
     } catch (error) {
-      // Error is handled by the context
+      // Error is handled by the context and will be synced to localError via useEffect
     } finally {
       setIsLoading(false);
     }
@@ -298,9 +321,9 @@ export default function SignupScreen() {
             />
           </View>
 
-          {error && (
+          {localError && (
             <Text style={[styles.errorText, { color: colors.notification }]}>
-              {error}
+              {localError}
             </Text>
           )}
 
@@ -322,7 +345,10 @@ export default function SignupScreen() {
             <Text style={[styles.footerText, { color: colors.text }]}>
               Already have an account?{' '}
             </Text>
-            <TouchableOpacity onPress={() => router.push('/auth/login')}>
+            <TouchableOpacity onPress={() => {
+              clearError(); // Clear errors before navigating
+              router.push('/auth/login');
+            }}>
               <Text style={[styles.linkText, { color: colors.tint }]}>Sign In</Text>
             </TouchableOpacity>
           </View>

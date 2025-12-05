@@ -138,7 +138,7 @@ export default function ShopAnalyticsScreen() {
         <>
           {/* Overview Cards */}
           <View style={styles.overviewCards}>
-            <View style={[styles.overviewCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.overviewCard, { backgroundColor: colors.cardBackground }]}>
               <IconSymbol name="bag.fill" size={32} color={colors.tint} />
               <Text style={[styles.overviewNumber, { color: colors.text }]}>
                 {analytics.totalBagsPosted}
@@ -148,7 +148,7 @@ export default function ShopAnalyticsScreen() {
               </Text>
             </View>
 
-            <View style={[styles.overviewCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.overviewCard, { backgroundColor: colors.cardBackground }]}>
               <IconSymbol name="cart.fill" size={32} color={colors.tint} />
               <Text style={[styles.overviewNumber, { color: colors.text }]}>
                 {analytics.totalOrders}
@@ -158,7 +158,7 @@ export default function ShopAnalyticsScreen() {
               </Text>
             </View>
 
-            <View style={[styles.overviewCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.overviewCard, { backgroundColor: colors.cardBackground }]}>
               <IconSymbol name="dollarsign.circle.fill" size={32} color={colors.tint} />
               <Text style={[styles.overviewNumber, { color: colors.text }]}>
                 {formatCurrency(analytics.totalRevenue)}
@@ -168,7 +168,7 @@ export default function ShopAnalyticsScreen() {
               </Text>
             </View>
 
-            <View style={[styles.overviewCard, { backgroundColor: colors.card }]}>
+            <View style={[styles.overviewCard, { backgroundColor: colors.cardBackground }]}>
               <IconSymbol name="star.fill" size={32} color={colors.tint} />
               <Text style={[styles.overviewNumber, { color: colors.text }]}>
                 {analytics.averageRating.toFixed(1)}
@@ -184,7 +184,7 @@ export default function ShopAnalyticsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Performance Trend
             </Text>
-            <View style={[styles.chartContainer, { backgroundColor: colors.card }]}>
+            <View style={[styles.chartContainer, { backgroundColor: colors.cardBackground }]}>
               <View style={styles.chartHeader}>
                 <Text style={[styles.chartTitle, { color: colors.text }]}>
                   {selectedPeriod.charAt(0).toUpperCase() + selectedPeriod.slice(1)} Performance
@@ -192,30 +192,37 @@ export default function ShopAnalyticsScreen() {
               </View>
               <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                 <View style={styles.chart}>
-                  {getStatsData().map((stat, index) => (
-                    <View key={index} style={styles.chartBar}>
-                      <View style={styles.barContainer}>
-                        <View
-                          style={[
-                            styles.bar,
-                            {
-                              height: Math.max(
-                                (stat.revenue / Math.max(...getStatsData().map(s => s.revenue))) * 100,
-                                10
-                              ),
-                              backgroundColor: colors.tint,
-                            },
-                          ]}
-                        />
+                  {getStatsData().map((stat, index) => {
+                    const label = selectedPeriod === 'daily' 
+                      ? formatDate((stat as any).date) 
+                      : selectedPeriod === 'weekly' 
+                        ? (stat as any).week 
+                        : (stat as any).month;
+                    return (
+                      <View key={index} style={styles.chartBar}>
+                        <View style={styles.barContainer}>
+                          <View
+                            style={[
+                              styles.bar,
+                              {
+                                height: Math.max(
+                                  (stat.revenue / Math.max(...getStatsData().map(s => s.revenue), 1)) * 100,
+                                  10
+                                ),
+                                backgroundColor: colors.tint,
+                              },
+                            ]}
+                          />
+                        </View>
+                        <Text style={[styles.barLabel, { color: colors.text }]}>
+                          {label}
+                        </Text>
+                        <Text style={[styles.barValue, { color: colors.text }]}>
+                          {stat.revenue}
+                        </Text>
                       </View>
-                      <Text style={[styles.barLabel, { color: colors.text }]}>
-                        {selectedPeriod === 'daily' ? formatDate(stat.date) : stat.week || stat.month}
-                      </Text>
-                      <Text style={[styles.barValue, { color: colors.text }]}>
-                        {stat.revenue}
-                      </Text>
-                    </View>
-                  ))}
+                    );
+                  })}
                 </View>
               </ScrollView>
             </View>
@@ -226,7 +233,7 @@ export default function ShopAnalyticsScreen() {
             <Text style={[styles.sectionTitle, { color: colors.text }]}>
               Popular Categories
             </Text>
-            <View style={[styles.categoriesContainer, { backgroundColor: colors.card }]}>
+            <View style={[styles.categoriesContainer, { backgroundColor: colors.cardBackground }]}>
               {analytics.popularCategories.map((category, index) => (
                 <View key={index} style={styles.categoryItem}>
                   <View style={styles.categoryIcon}>
@@ -254,41 +261,43 @@ export default function ShopAnalyticsScreen() {
             </View>
           </View>
 
-          {/* Recent Performance */}
-          <View style={styles.recentSection}>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>
-              Recent Performance
-            </Text>
-            <View style={[styles.recentContainer, { backgroundColor: colors.card }]}>
-              <View style={styles.recentItem}>
-                <IconSymbol name="clock.fill" size={20} color={colors.tint} />
-                <Text style={[styles.recentLabel, { color: colors.text }]}>
-                  Average Order Time
-                </Text>
-                <Text style={[styles.recentValue, { color: colors.text }]}>
-                  15 min
-                </Text>
-              </View>
-              <View style={styles.recentItem}>
-                <IconSymbol name="percent" size={20} color={colors.tint} />
-                <Text style={[styles.recentLabel, { color: colors.text }]}>
-                  Completion Rate
-                </Text>
-                <Text style={[styles.recentValue, { color: colors.text }]}>
-                  94%
-                </Text>
-              </View>
-              <View style={styles.recentItem}>
-                <IconSymbol name="repeat" size={20} color={colors.tint} />
-                <Text style={[styles.recentLabel, { color: colors.text }]}>
-                  Repeat Customers
-                </Text>
-                <Text style={[styles.recentValue, { color: colors.text }]}>
-                  67%
-                </Text>
+          {/* Recent Performance - Only show if there's data */}
+          {analytics.totalOrders > 0 && (
+            <View style={styles.recentSection}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>
+                Recent Performance
+              </Text>
+              <View style={[styles.recentContainer, { backgroundColor: colors.cardBackground }]}>
+                <View style={styles.recentItem}>
+                  <IconSymbol name="clock.fill" size={20} color={colors.tint} />
+                  <Text style={[styles.recentLabel, { color: colors.text }]}>
+                    Total Orders
+                  </Text>
+                  <Text style={[styles.recentValue, { color: colors.text }]}>
+                    {analytics.totalOrders}
+                  </Text>
+                </View>
+                <View style={styles.recentItem}>
+                  <IconSymbol name="dollarsign.circle.fill" size={20} color={colors.tint} />
+                  <Text style={[styles.recentLabel, { color: colors.text }]}>
+                    Total Revenue
+                  </Text>
+                  <Text style={[styles.recentValue, { color: colors.text }]}>
+                    {formatCurrency(analytics.totalRevenue)}
+                  </Text>
+                </View>
+                <View style={styles.recentItem}>
+                  <IconSymbol name="star.fill" size={20} color={colors.tint} />
+                  <Text style={[styles.recentLabel, { color: colors.text }]}>
+                    Average Rating
+                  </Text>
+                  <Text style={[styles.recentValue, { color: colors.text }]}>
+                    {analytics.averageRating > 0 ? analytics.averageRating.toFixed(1) : 'N/A'}
+                  </Text>
+                </View>
               </View>
             </View>
-          </View>
+          )}
         </>
       )}
     </ScrollView>

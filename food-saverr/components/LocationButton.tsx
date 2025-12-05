@@ -6,7 +6,7 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
 interface LocationButtonProps {
-  onLocationUpdate?: (location: { latitude: number; longitude: number }) => void;
+  onLocationUpdate?: (location: { latitude: number; longitude: number; city?: string; country?: string }) => void;
   style?: any;
   textStyle?: any;
   showText?: boolean;
@@ -29,6 +29,8 @@ export const LocationButton: React.FC<LocationButtonProps> = ({
         onLocationUpdate({
           latitude: newLocation.latitude,
           longitude: newLocation.longitude,
+          city: newLocation.city,
+          country: newLocation.country,
         });
       }
     } catch (error) {

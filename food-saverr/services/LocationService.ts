@@ -8,6 +8,8 @@ export interface LocationData {
   altitude?: number;
   speed?: number;
   time?: number;
+  city?: string;
+  country?: string;
 }
 
 export interface LocationError {
@@ -59,6 +61,23 @@ class LocationService {
         distanceInterval: 10,
       });
 
+      // Reverse geocode to get city/country when possible
+      let city: string | undefined;
+      let country: string | undefined;
+      try {
+        const places = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        if (places && places.length > 0) {
+          const place = places[0];
+          city = place.city || place.subregion || place.region || undefined;
+          country = place.country || undefined;
+        }
+      } catch (geocodeErr) {
+        // Non-fatal: keep coordinates if reverse geocode fails
+      }
+
       return {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
@@ -66,6 +85,8 @@ class LocationService {
         altitude: location.coords.altitude,
         speed: location.coords.speed,
         time: location.timestamp,
+        city,
+        country,
       };
     } catch (error: any) {
       console.error('Location error:', error);

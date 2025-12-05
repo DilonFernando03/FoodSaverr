@@ -23,68 +23,25 @@ export default function ShopOrdersScreen() {
 
   const shop = user?.userType === 'shop' ? user : null;
 
-  // Mock orders data for demonstration
-  const mockOrders = [
-    {
-      id: 'order-1',
-      bagId: 'bag-1',
-      customerId: 'customer-1',
-      customerName: 'John Doe',
-      customerPhone: '+94 77 123 4567',
-      quantity: 1,
-      totalPrice: 200,
-      orderStatus: OrderStatus.PENDING,
-      createdAt: new Date('2024-01-15T10:30:00'),
-      collectionTime: new Date('2024-01-15T18:00:00'),
-      notes: 'Please call when ready',
-    },
-    {
-      id: 'order-2',
-      bagId: 'bag-2',
-      customerId: 'customer-2',
-      customerName: 'Jane Smith',
-      customerPhone: '+94 77 987 6543',
-      quantity: 2,
-      totalPrice: 400,
-      orderStatus: OrderStatus.CONFIRMED,
-      createdAt: new Date('2024-01-15T11:15:00'),
-      collectionTime: new Date('2024-01-15T19:00:00'),
-    },
-    {
-      id: 'order-3',
-      bagId: 'bag-1',
-      customerId: 'customer-3',
-      customerName: 'Mike Johnson',
-      customerPhone: '+94 77 555 1234',
-      quantity: 1,
-      totalPrice: 200,
-      orderStatus: OrderStatus.READY_FOR_PICKUP,
-      createdAt: new Date('2024-01-15T09:45:00'),
-      collectionTime: new Date('2024-01-15T17:30:00'),
-    },
-    {
-      id: 'order-4',
-      bagId: 'bag-3',
-      customerId: 'customer-4',
-      customerName: 'Sarah Wilson',
-      customerPhone: '+94 77 444 5678',
-      quantity: 1,
-      totalPrice: 150,
-      orderStatus: OrderStatus.COMPLETED,
-      createdAt: new Date('2024-01-14T16:20:00'),
-      collectionTime: new Date('2024-01-14T18:00:00'),
-    },
-  ];
-
+  // Filter orders by selected status
   const filteredOrders = selectedStatus === 'all' 
-    ? mockOrders 
-    : mockOrders.filter(order => order.orderStatus === selectedStatus);
+    ? orders 
+    : orders.filter(order => order.orderStatus === selectedStatus);
 
   const handleUpdateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     try {
+      const { updateOrderStatus: updateStatus } = await import('@/lib/supabase');
+      const { error } = await updateStatus(orderId, newStatus);
+      
+      if (error) {
+        throw error;
+      }
+      
+      // Update local state
       await updateOrderStatus(orderId, newStatus);
       Alert.alert('Success', 'Order status updated successfully');
     } catch (error) {
+      console.error('Error updating order status:', error);
       Alert.alert('Error', 'Failed to update order status');
     }
   };

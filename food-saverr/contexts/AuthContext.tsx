@@ -1,13 +1,15 @@
-import React, { createContext, useContext, useReducer, ReactNode, useEffect } from 'react';
+import React, { createContext, useContext, useReducer, ReactNode, useEffect, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, signInUser, signUpUser, signOutUser, getCurrentUser } from '@/lib/supabase';
 import { AuthState, LoginCredentials, SignupCredentials, UserType, Customer, Shop } from '@/types/User';
+import { validatePassword } from '@/lib/passwordPolicy';
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<void>;
   signup: (credentials: SignupCredentials) => Promise<void>;
   logout: () => Promise<void>;
   updateUser: (user: Customer | Shop) => Promise<void>;
+  clearError: () => void;
 }
 
 type AuthAction =
@@ -106,16 +108,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastLoginAt: new Date(userData.last_login_at || userData.created_at),
           isActive: true,
           businessInfo: {
-            businessName: profile?.business_name || 'Demo Shop',
-            businessType: profile?.business_type || 'Restaurant',
+            businessName: profile?.business_name || '',
+            businessType: profile?.business_type || '',
             description: profile?.description || '',
             phoneNumber: userData.phone_number || '',
           },
           location: {
             address: profile?.address || '',
-            city: profile?.city || 'Colombo',
+            city: profile?.city || '',
             postalCode: profile?.postal_code || '',
-            coordinates: { lat: 0, lng: 0 },
+            coordinates: profile?.coordinates ? (() => {
+              // Parse coordinates from PostGIS geography point
+              const coords = profile.coordinates as any;
+              if (typeof coords === 'string') {
+                const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+                if (match) {
+                  return { lat: parseFloat(match[2]), lng: parseFloat(match[1]) };
+                }
+              } else if (coords && typeof coords === 'object') {
+                const lat = coords.lat ?? coords.latitude ?? coords.y;
+                const lng = coords.lng ?? coords.longitude ?? coords.x;
+                if (lat != null && lng != null) {
+                  return { lat, lng };
+                }
+                if (coords.coordinates && Array.isArray(coords.coordinates) && coords.coordinates.length >= 2) {
+                  return { lat: coords.coordinates[1], lng: coords.coordinates[0] };
+                }
+              }
+              return null;
+            })() : null,
           },
           operatingHours: profile?.operating_hours || {},
           verificationStatus: {
@@ -148,8 +169,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           isActive: true,
           phoneNumber: userData.phone_number || '',
           preferences: {
-            favoriteCategories: profile?.dietary_preferences || [],
-            maxDistance: 5,
+            favoriteCategories: profile?.favorite_categories || [],
+            maxDistance: (profile as any)?.max_distance_km ?? 5,
             notifications: true,
           },
           orderHistory: [],
@@ -207,16 +228,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastLoginAt: new Date(userData.last_login_at || userData.created_at),
           isActive: true,
           businessInfo: {
-            businessName: profile?.business_name || 'Demo Shop',
-            businessType: profile?.business_type || 'Restaurant',
+            businessName: profile?.business_name || '',
+            businessType: profile?.business_type || '',
             description: profile?.description || '',
             phoneNumber: userData.phone_number || '',
           },
           location: {
             address: profile?.address || '',
-            city: profile?.city || 'Colombo',
+            city: profile?.city || '',
             postalCode: profile?.postal_code || '',
-            coordinates: { lat: 0, lng: 0 }, // Parse from coordinates field if needed
+            coordinates: profile?.coordinates ? (() => {
+              // Parse coordinates from PostGIS geography point
+              const coords = profile.coordinates as any;
+              if (typeof coords === 'string') {
+                const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+                if (match) {
+                  return { lat: parseFloat(match[2]), lng: parseFloat(match[1]) };
+                }
+              } else if (coords && typeof coords === 'object') {
+                const lat = coords.lat ?? coords.latitude ?? coords.y;
+                const lng = coords.lng ?? coords.longitude ?? coords.x;
+                if (lat != null && lng != null) {
+                  return { lat, lng };
+                }
+                if (coords.coordinates && Array.isArray(coords.coordinates) && coords.coordinates.length >= 2) {
+                  return { lat: coords.coordinates[1], lng: coords.coordinates[0] };
+                }
+              }
+              return null;
+            })() : null,
           },
           operatingHours: profile?.operating_hours || {},
           verificationStatus: {
@@ -239,6 +279,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         } as Shop;
       } else {
+        // Parse customer coordinates from PostGIS geography point
+        let customerCoords = { lat: 0, lng: 0 };
+        if (profile?.address_coordinates) {
+          const coords = profile.address_coordinates as any;
+          if (typeof coords === 'string') {
+            // Try to parse PostGIS POINT string: "POINT(lng lat)" or "SRID=4326;POINT(lng lat)"
+            const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+            if (match) {
+              customerCoords.lng = parseFloat(match[1]);
+              customerCoords.lat = parseFloat(match[2]);
+            }
+          } else if (coords && typeof coords === 'object') {
+            customerCoords.lng = coords.lng ?? coords.longitude ?? coords.x ?? 0;
+            customerCoords.lat = coords.lat ?? coords.latitude ?? coords.y ?? 0;
+            if ((customerCoords.lat === 0 && customerCoords.lng === 0) && coords.coordinates) {
+              const coordArray = coords.coordinates;
+              if (Array.isArray(coordArray) && coordArray.length >= 2) {
+                customerCoords.lng = coordArray[0];
+                customerCoords.lat = coordArray[1];
+              }
+            }
+          }
+        }
+
         user = {
           id: userData.id,
           email: userData.email,
@@ -248,10 +312,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastLoginAt: new Date(userData.last_login_at || userData.created_at),
           isActive: true,
           phoneNumber: userData.phone_number || '',
+          address: {
+            street: profile?.address_street || '',
+            city: profile?.address_city || '',
+            postalCode: profile?.address_postal_code || '',
+            coordinates: customerCoords,
+          },
           preferences: {
-            favoriteCategories: profile?.dietary_preferences || [],
-            maxDistance: 5,
-            notifications: true,
+            favoriteCategories: profile?.favorite_categories || [],
+            maxDistance: profile?.max_distance_km || 5,
+            notifications: profile?.notifications_enabled ?? true,
           },
           orderHistory: [],
           favoriteShops: [],
@@ -275,6 +345,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dispatch({ type: 'SET_LOADING', payload: true });
       dispatch({ type: 'CLEAR_ERROR' });
 
+      const passwordValidation = validatePassword(credentials.password);
+      if (!passwordValidation.valid) {
+        const message = passwordValidation.message || 'Password does not meet the requirements.';
+        dispatch({ type: 'SET_LOADING', payload: false });
+        throw new Error(message);
+      }
+
       // Use Supabase to sign up
       const signupData: any = {
         email: credentials.email,
@@ -289,8 +366,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           business_name: credentials.businessInfo.businessName,
           business_type: credentials.businessInfo.businessType,
           address: '',
-          city: 'Colombo',
-          coordinates: { lat: 6.9271, lng: 79.8612 },
+          city: '',
+          coordinates: null, // Will be set when shop captures location
         };
       }
 
@@ -302,7 +379,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           dispatch({ type: 'SET_LOADING', payload: false });
           throw new Error('We sent a verification link to your email. Please verify to continue.');
         }
-        if (signupError?.message?.includes('duplicate key value violates unique constraint')) {
+        // Check for duplicate email errors (multiple possible error messages)
+        if (signupError?.message?.includes('already registered') ||
+            signupError?.message?.includes('already exists') ||
+            signupError?.message?.includes('duplicate key') ||
+            signupError?.message?.includes('unique constraint') ||
+            signupError?.message?.includes('User already registered')) {
           throw new Error('This email is already registered. Please use a different email or try logging in.');
         }
         throw new Error(signupError?.message || 'Signup failed. Please try again.');
@@ -363,16 +445,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastLoginAt: now,
           isActive: true,
           businessInfo: {
-            businessName: profile?.business_name || 'Demo Shop',
-            businessType: profile?.business_type || 'Restaurant',
+            businessName: profile?.business_name || '',
+            businessType: profile?.business_type || '',
             description: profile?.description || '',
             phoneNumber: userData.phone_number || '',
           },
           location: {
             address: profile?.address || '',
-            city: profile?.city || 'Colombo',
+            city: profile?.city || '',
             postalCode: profile?.postal_code || '',
-            coordinates: { lat: 6.9271, lng: 79.8612 },
+            coordinates: profile?.coordinates ? (() => {
+              // Parse coordinates from PostGIS geography point
+              const coords = profile.coordinates as any;
+              if (typeof coords === 'string') {
+                const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+                if (match) {
+                  return { lat: parseFloat(match[2]), lng: parseFloat(match[1]) };
+                }
+              } else if (coords && typeof coords === 'object') {
+                const lat = coords.lat ?? coords.latitude ?? coords.y;
+                const lng = coords.lng ?? coords.longitude ?? coords.x;
+                if (lat != null && lng != null) {
+                  return { lat, lng };
+                }
+                if (coords.coordinates && Array.isArray(coords.coordinates) && coords.coordinates.length >= 2) {
+                  return { lat: coords.coordinates[1], lng: coords.coordinates[0] };
+                }
+              }
+              return null;
+            })() : null,
           },
           operatingHours: {},
           verificationStatus: {
@@ -394,6 +495,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           },
         } as Shop;
       } else {
+        // Parse customer coordinates from PostGIS geography point
+        let customerCoords = { lat: 0, lng: 0 };
+        if (profile?.address_coordinates) {
+          const coords = profile.address_coordinates as any;
+          if (typeof coords === 'string') {
+            const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
+            if (match) {
+              customerCoords.lng = parseFloat(match[1]);
+              customerCoords.lat = parseFloat(match[2]);
+            }
+          } else if (coords && typeof coords === 'object') {
+            customerCoords.lng = coords.lng ?? coords.longitude ?? coords.x ?? 0;
+            customerCoords.lat = coords.lat ?? coords.latitude ?? coords.y ?? 0;
+            if ((customerCoords.lat === 0 && customerCoords.lng === 0) && coords.coordinates) {
+              const coordArray = coords.coordinates;
+              if (Array.isArray(coordArray) && coordArray.length >= 2) {
+                customerCoords.lng = coordArray[0];
+                customerCoords.lat = coordArray[1];
+              }
+            }
+          }
+        }
+
         user = {
           id: userData.id,
           email: userData.email,
@@ -403,10 +527,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastLoginAt: now,
           isActive: true,
           phoneNumber: userData.phone_number || '',
+          address: {
+            street: profile?.address_street || '',
+            city: profile?.address_city || '',
+            postalCode: profile?.address_postal_code || '',
+            coordinates: customerCoords,
+          },
           preferences: {
-            favoriteCategories: [],
-            maxDistance: 5,
-            notifications: true,
+            favoriteCategories: profile?.favorite_categories || [],
+            maxDistance: profile?.max_distance_km || 5,
+            notifications: profile?.notifications_enabled ?? true,
           },
           orderHistory: [],
           favoriteShops: [],
@@ -445,12 +575,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const clearError = useCallback(() => {
+    dispatch({ type: 'CLEAR_ERROR' });
+  }, []);
+
   const value: AuthContextType = {
     ...state,
     login,
     signup,
     logout,
     updateUser,
+    clearError,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

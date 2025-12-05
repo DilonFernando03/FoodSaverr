@@ -1,5 +1,5 @@
-import React from 'react';
-import { StyleSheet, ScrollView, TouchableOpacity, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { StyleSheet, ScrollView, TouchableOpacity, Alert, View, Text } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { IconSymbol } from '@/components/ui/IconSymbol';
@@ -8,15 +8,40 @@ import { ThemedView } from '@/components/ThemedView';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { useAuth } from '@/contexts/AuthContext';
+import { supabase } from '@/lib/supabase';
 import { Customer } from '@/types/User';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const router = useRouter();
   
   const customer = user?.userType === 'customer' ? (user as Customer) : null;
+  const [radiusKm, setRadiusKm] = useState<number>(customer?.preferences.maxDistance ?? 5);
+  const decreaseRadius = () => setRadiusKm(prev => Math.max(1, prev - 1));
+  const increaseRadius = () => setRadiusKm(prev => Math.min(30, prev + 1));
+
+  const saveRadius = async () => {
+    if (!customer) return;
+    try {
+      // Persist to Supabase customer_profiles
+      await (supabase as any)
+        .from('customer_profiles')
+        .update({ max_distance_km: radiusKm, updated_at: new Date().toISOString() })
+        .eq('id', customer.id);
+
+      // Update local auth state
+      const updated = {
+        ...customer,
+        preferences: { ...customer.preferences, maxDistance: radiusKm },
+      } as Customer;
+      await updateUser(updated);
+      Alert.alert('Saved', `Search radius set to ${radiusKm} km`);
+    } catch (e) {
+      Alert.alert('Error', 'Failed to save radius');
+    }
+  };
 
   const menuItems = [
     {
@@ -121,6 +146,28 @@ export default function ProfileScreen() {
           <ThemedText style={[styles.statLabel, { color: colors.onSurface }]}>Food Saved</ThemedText>
         </ThemedView>
       </ThemedView>
+
+      {/* Location Settings */}
+      {customer && (
+        <ThemedView style={styles.menuContainer}>
+          <ThemedView style={[styles.menuItem, { backgroundColor: colors.cardBackground }]}> 
+            <IconSymbol name="location.fill" size={20} color={colors.primary} />
+            <ThemedText style={[styles.menuText, { color: colors.text }]}>Search radius</ThemedText>
+            <View style={styles.radiusControls}>
+              <TouchableOpacity style={[styles.radiusButton, { backgroundColor: colors.primary }]} onPress={decreaseRadius}>
+                <Text style={{ color: colors.background, fontWeight: '700' }}>-</Text>
+              </TouchableOpacity>
+              <ThemedText style={[styles.radiusValue, { color: colors.text }]}>{radiusKm} km</ThemedText>
+              <TouchableOpacity style={[styles.radiusButton, { backgroundColor: colors.primary }]} onPress={increaseRadius}>
+                <Text style={{ color: colors.background, fontWeight: '700' }}>+</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.saveButton, { backgroundColor: colors.primary }]} onPress={saveRadius}>
+                <ThemedText style={{ color: colors.background, fontWeight: '600' }}>Save</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </ThemedView>
+        </ThemedView>
+      )}
 
       {/* Menu Items */}
       <ThemedView style={styles.menuContainer}>
@@ -236,6 +283,29 @@ const styles = StyleSheet.create({
   menuContainer: {
     paddingHorizontal: 16,
     marginBottom: 20,
+  },
+  radiusControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  radiusButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  radiusValue: {
+    width: 70,
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  saveButton: {
+    marginLeft: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
   },
   menuItem: {
     flexDirection: 'row',

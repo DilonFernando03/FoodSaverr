@@ -38,6 +38,7 @@ export default {
     extra: {
       supabaseUrl: process.env.EXPO_PUBLIC_SUPABASE_URL,
       supabaseAnonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      emailRedirectTo: process.env.EXPO_PUBLIC_EMAIL_REDIRECT_TO,
     }
   }
 };

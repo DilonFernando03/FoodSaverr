@@ -22,11 +22,19 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
   
-  const { login, error, isAuthenticated, user, isLoading } = useAuth();
+  const { login, error, isAuthenticated, user, isLoading, clearError } = useAuth();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+
+  // Clear error when component mounts
+  useEffect(() => {
+    clearError();
+    setLocalError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run on mount
 
   // Note: We don't auto-redirect from login screen to prevent loops
   // The index screen handles the redirect logic
@@ -40,6 +48,8 @@ export default function LoginScreen() {
     }
 
     setIsLoggingIn(true);
+    setLocalError(null); // Clear any previous errors
+    clearError(); // Clear context error
     try {
       await login({ email: email.trim(), password });
       console.log('Login completed, checking user state...');
@@ -51,36 +61,13 @@ export default function LoginScreen() {
     } catch (error) {
       // Surface the error to the user as well (web/mobile)
       const message = (error as any)?.message || 'Login failed. Please try again.';
+      setLocalError(message);
       Alert.alert('Sign in failed', message);
     } finally {
       setIsLoggingIn(false);
     }
   };
 
-  const handleDemoLogin = async (userType: 'customer' | 'shop') => {
-    const demoEmail = userType === 'shop' ? 'shop@demo.com' : 'customer@demo.com';
-    const demoPassword = 'demo123';
-    
-    setEmail(demoEmail);
-    setPassword(demoPassword);
-    
-    // Automatically submit the login
-    setIsLoggingIn(true);
-    try {
-      await login({ email: demoEmail, password: demoPassword });
-      console.log('Demo login completed, checking user state...');
-      // Force a small delay to ensure state is updated
-      setTimeout(() => {
-        // Redirect will happen via the index screen
-        router.replace('/');
-      }, 100);
-    } catch (error) {
-      // Error is handled by the context
-      console.error('Demo login error:', error);
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
 
   // Show loading screen while checking authentication
   if (isLoading) {
@@ -150,9 +137,10 @@ export default function LoginScreen() {
             />
           </View>
 
-          {error && (
+          {/* Only show local login errors, not signup errors from context */}
+          {localError && (
             <Text style={[styles.errorText, { color: '#FF3B30' }]}>
-              {error}
+              {localError}
             </Text>
           )}
 
@@ -170,38 +158,14 @@ export default function LoginScreen() {
             </Text>
           </TouchableOpacity>
 
-
-          <View style={styles.divider}>
-            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-            <Text style={[styles.dividerText, { color: colors.text }]}>Demo Accounts</Text>
-            <View style={[styles.dividerLine, { backgroundColor: colors.border }]} />
-          </View>
-
-          <View style={styles.demoButtons}>
-            <TouchableOpacity
-              style={[styles.demoButton, { borderColor: colors.border }]}
-              onPress={() => handleDemoLogin('customer')}
-            >
-              <Text style={[styles.demoButtonText, { color: colors.text }]}>
-                Customer Demo
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.demoButton, { borderColor: colors.border }]}
-              onPress={() => handleDemoLogin('shop')}
-            >
-              <Text style={[styles.demoButtonText, { color: colors.text }]}>
-                Shop Demo
-              </Text>
-            </TouchableOpacity>
-          </View>
-
           <View style={styles.footer}>
             <Text style={[styles.footerText, { color: colors.text }]}>
               Don't have an account?{' '}
             </Text>
-            <TouchableOpacity onPress={() => router.push('/auth/signup')}>
+            <TouchableOpacity onPress={() => {
+              clearError(); // Clear errors before navigating
+              router.push('/auth/signup');
+            }}>
               <Text style={[styles.linkText, { color: colors.tint }]}>Sign Up</Text>
             </TouchableOpacity>
           </View>
@@ -274,36 +238,6 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.6,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  dividerText: {
-    marginHorizontal: 16,
-    fontSize: 14,
-    opacity: 0.7,
-  },
-  demoButtons: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 32,
-  },
-  demoButton: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-  },
-  demoButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
   },
   footer: {
     flexDirection: 'row',

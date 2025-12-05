@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { Shop } from '@/types/User';
+import { LocationButton } from '@/components/LocationButton';
 
 export default function ShopProfileScreen() {
   const { user, logout, updateUser } = useAuth();
@@ -50,6 +51,34 @@ export default function ShopProfileScreen() {
       reviews: shop?.settings.notificationSettings.reviews || true,
     },
   });
+
+  useEffect(() => {
+    if (!shop || showEditModal) {
+      return;
+    }
+
+    setProfileData({
+      businessName: shop.businessInfo.businessName || '',
+      businessType: shop.businessInfo.businessType || '',
+      description: shop.businessInfo.description || '',
+      phoneNumber: shop.businessInfo.phoneNumber || '',
+      website: shop.businessInfo.website || '',
+      address: shop.location.address || '',
+      city: shop.location.city || '',
+      postalCode: shop.location.postalCode || '',
+    });
+  }, [shop, showEditModal]);
+
+  const coordinates = shop?.location.coordinates;
+
+  const handleUseCurrentLocation = (coords: { latitude: number; longitude: number; city?: string }) => {
+    if (!coords) return;
+    const messageParts = [`${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`];
+    if (coords.city) {
+      messageParts.push(coords.city);
+    }
+    Alert.alert('Location Updated', `Saved shop location at ${messageParts.join(' · ')}.`);
+  };
 
   const handleSaveProfile = async () => {
     if (!shop) return;
@@ -234,6 +263,28 @@ export default function ShopProfileScreen() {
               </View>
             </View>
           )}
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={[styles.sectionTitle, { color: colors.text }]}>Location</Text>
+        <View style={[styles.locationCard, { backgroundColor: colors.card }]}>
+          <View style={styles.locationInfo}>
+            <Text style={[styles.infoLabel, { color: colors.text }]}>Coordinates</Text>
+            <Text style={[styles.locationValue, { color: colors.text }]}>
+              {coordinates ? `${coordinates.lat.toFixed(5)}, ${coordinates.lng.toFixed(5)}` : 'Not set'}
+            </Text>
+            <Text style={[styles.locationHint, { color: colors.text }]}>
+              {coordinates
+                ? 'Tap below if your shop location has changed.'
+                : 'Use your current device location so customers can find you.'}
+            </Text>
+          </View>
+          <LocationButton
+            showText
+            style={[styles.locationButton, { backgroundColor: colors.tint, borderColor: colors.tint }]}
+            onLocationUpdate={handleUseCurrentLocation}
+          />
         </View>
       </View>
 
@@ -633,6 +684,25 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 16,
     fontWeight: '500',
+  },
+  locationCard: {
+    padding: 16,
+    borderRadius: 12,
+    gap: 16,
+  },
+  locationInfo: {
+    gap: 4,
+  },
+  locationValue: {
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  locationHint: {
+    fontSize: 13,
+    opacity: 0.7,
+  },
+  locationButton: {
+    alignSelf: 'flex-start',
   },
   actionsContainer: {
     flexDirection: 'row',

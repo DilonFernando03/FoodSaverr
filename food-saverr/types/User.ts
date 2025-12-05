@@ -24,7 +24,7 @@ export interface Customer extends BaseUser {
     coordinates: {
       lat: number;
       lng: number;
-    };
+    } | null;
   };
   preferences: {
     favoriteCategories: string[];
@@ -53,7 +53,7 @@ export interface Shop extends BaseUser {
     coordinates: {
       lat: number;
       lng: number;
-    };
+    } | null;
   };
   operatingHours: {
     [key: string]: {

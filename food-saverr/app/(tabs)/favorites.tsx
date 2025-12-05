@@ -1,24 +1,49 @@
 import React from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { useSurpriseBag } from '@/contexts/SurpriseBagContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { SurpriseBag } from '@/types/SurpriseBag';
 
 export default function FavoritesScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const { state, toggleFavorite } = useSurpriseBag();
+  const router = useRouter();
 
   const favoriteBags = state.bags.filter(bag => bag.isFavorited);
 
-  const renderFavoriteItem = ({ item }: { item: any }) => (
-    <TouchableOpacity style={[styles.favoriteItem, { backgroundColor: colors.cardBackground }]}>
-      <ThemedView style={styles.bagImage}>
-        <IconSymbol name="photo" size={32} color={colors.icon} />
-      </ThemedView>
+  const renderFavoriteItem = ({ item }: { item: SurpriseBag }) => {
+    const firstImage = item.images && item.images.length > 0 ? item.images[0] : null;
+    
+    return (
+    <TouchableOpacity
+      style={[styles.favoriteItem, { backgroundColor: colors.cardBackground }]}
+      onPress={() =>
+        router.push({
+          pathname: '/bag/[bagId]',
+          params: { bagId: item.id },
+        })
+      }
+    >
+      {firstImage ? (
+        <Image
+          source={{ uri: firstImage }}
+          style={styles.bagImage}
+          contentFit="cover"
+          transition={200}
+          placeholder={{ blurhash: 'LGF5]+Yk^6#M@-5c,1J5@[or[Q6.' }}
+        />
+      ) : (
+        <ThemedView style={styles.bagImagePlaceholder}>
+          <IconSymbol name="photo" size={32} color={colors.icon} />
+        </ThemedView>
+      )}
       
       <ThemedView style={styles.bagDetails}>
         <ThemedText style={[styles.restaurantName, { color: colors.text }]}>{item.restaurantName}</ThemedText>
@@ -54,7 +79,8 @@ export default function FavoritesScreen() {
         />
       </TouchableOpacity>
     </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <ThemedView style={[styles.container, { backgroundColor: colors.background }]}>
@@ -131,6 +157,13 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   bagImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 8,
+    backgroundColor: '#F3F4F6',
+    marginRight: 12,
+  },
+  bagImagePlaceholder: {
     width: 80,
     height: 80,
     borderRadius: 8,

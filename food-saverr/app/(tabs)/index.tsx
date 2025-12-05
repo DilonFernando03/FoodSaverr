@@ -1,16 +1,19 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { StyleSheet, ScrollView, TouchableOpacity, Alert, Dimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Image } from 'expo-image';
+import { useRouter } from 'expo-router';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import { LocationButton } from '@/components/LocationButton';
 import { LocationDisplay } from '@/components/LocationDisplay';
 import { useSurpriseBag } from '@/contexts/SurpriseBagContext';
 import { useLocationContext } from '@/contexts/LocationContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { SurpriseBag, BagCategory, UserLocation } from '@/types/SurpriseBag';
+import { useAuth } from '@/contexts/AuthContext';
+import { Customer } from '@/types/User';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = width * 0.8;
@@ -20,35 +23,46 @@ export default function DiscoverScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const { state, getPopularBags, getNearbyBags, toggleFavorite, setUserLocation } = useSurpriseBag();
   const { location: currentLocation, loading: locationLoading } = useLocationContext();
+  const { user } = useAuth();
   const [selectedCategory, setSelectedCategory] = useState<BagCategory | null>(null);
+  const router = useRouter();
 
-  useEffect(() => {
-    // Set default location to Colombo, Sri Lanka
-    const defaultLocation: UserLocation = {
-      city: 'Colombo',
-      address: 'Colombo, Sri Lanka',
-      coordinates: {
-        lat: 6.9271,
-        lng: 79.8612,
-      },
-    };
-    setUserLocation(defaultLocation);
-  }, []);
+  // Remove default static location; we'll rely on actual device location
+  // so nothing runs here on mount.
+  useEffect(() => {}, []);
 
-  // Update user location when current location changes
+  // Update user location when current location changes OR use saved coordinates from customer profile
   useEffect(() => {
+    // Priority: 1. Current device location, 2. Saved customer coordinates from database
     if (currentLocation) {
+      const cityLabel = currentLocation.city || 'Current Location';
+      const countryLabel = currentLocation.country ? `, ${currentLocation.country}` : '';
       const locationUpdate: UserLocation = {
-        city: 'Current Location',
-        address: 'Your current location',
+        city: `${cityLabel}${countryLabel}`,
+        address: `${cityLabel}${countryLabel}`,
         coordinates: {
           lat: currentLocation.latitude,
           lng: currentLocation.longitude,
         },
       };
       setUserLocation(locationUpdate);
+    } else if (user?.userType === 'customer') {
+      // Use saved coordinates from customer profile if available
+      const customer = user as Customer;
+      if (customer.address?.coordinates && 
+          (customer.address.coordinates.lat !== 0 || customer.address.coordinates.lng !== 0)) {
+        const locationUpdate: UserLocation = {
+          city: customer.address.city || 'Saved Location',
+          address: customer.address.street || customer.address.city || 'Saved Location',
+          coordinates: {
+            lat: customer.address.coordinates.lat,
+            lng: customer.address.coordinates.lng,
+          },
+        };
+        setUserLocation(locationUpdate);
+      }
     }
-  }, [currentLocation]); // Removed setUserLocation from dependencies
+  }, [currentLocation, user]); // Removed setUserLocation from dependencies
 
   const handleLocationUpdate = useCallback((location: { latitude: number; longitude: number }) => {
     const locationUpdate: UserLocation = {
@@ -62,8 +76,17 @@ export default function DiscoverScreen() {
     setUserLocation(locationUpdate);
   }, [setUserLocation]);
 
+  const maxDistanceKm = user?.userType === 'customer' ? (user as any).preferences?.maxDistance ?? state.filters.maxDistance : state.filters.maxDistance;
+  
+  // Get bags - show all available bags, filter by distance if location is set
   const popularBags = getPopularBags();
-  const nearbyBags = getNearbyBags();
+  const nearbyBags = getNearbyBags(maxDistanceKm);
+  
+  // Show all available bags (not just those in radius) if no location is set
+  // Otherwise filter by distance
+  const allBagsInRadius = state.userLocation 
+    ? state.bags.filter(bag => bag.distance <= maxDistanceKm && bag.isAvailable && bag.itemsLeft > 0)
+    : state.bags.filter(bag => bag.isAvailable && bag.itemsLeft > 0);
 
   const getCategoryIcon = (category: BagCategory) => {
     const icons = {
@@ -93,12 +116,36 @@ export default function DiscoverScreen() {
     return labels[category] || 'Other';
   };
 
-  const renderSurpriseBagCard = (bag: SurpriseBag) => (
-    <TouchableOpacity key={bag.id} style={[styles.bagCard, { backgroundColor: colors.cardBackground }]}>
+  const handleOpenBag = (bagId: string) => {
+    router.push({
+      pathname: '/bag/[bagId]',
+      params: { bagId },
+    });
+  };
+
+  const renderSurpriseBagCard = (bag: SurpriseBag) => {
+    const firstImage = bag.images && bag.images.length > 0 ? bag.images[0] : null;
+    
+    return (
+    <TouchableOpacity
+      key={bag.id}
+      style={[styles.bagCard, { backgroundColor: colors.cardBackground }]}
+      onPress={() => handleOpenBag(bag.id)}
+    >
       <ThemedView style={styles.bagImageContainer}>
-        <ThemedView style={styles.bagImage}>
-          <IconSymbol name="photo" size={40} color={colors.icon} />
-        </ThemedView>
+        {firstImage ? (
+          <Image
+            source={{ uri: firstImage }}
+            style={styles.bagImage}
+            contentFit="cover"
+            transition={200}
+            placeholder={{ blurhash: 'LGF5]+Yk^6#M@-5c,1J5@[or[Q6.' }}
+          />
+        ) : (
+          <ThemedView style={styles.bagImagePlaceholder}>
+            <IconSymbol name="photo" size={40} color={colors.icon} />
+          </ThemedView>
+        )}
         
         {bag.itemsLeft <= 3 && (
           <ThemedView style={[styles.urgencyBadge, { backgroundColor: colors.warning }]}>
@@ -155,33 +202,12 @@ export default function DiscoverScreen() {
         </ThemedView>
       </ThemedView>
     </TouchableOpacity>
-  );
+    );
+  };
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-        {/* Location Selector */}
-      <ThemedView style={[styles.locationContainer, { backgroundColor: colors.surface }]}>
-        <IconSymbol name="location.fill" size={20} color={colors.primary} />
-        <ThemedView style={styles.locationTextContainer}>
-          <ThemedText style={[styles.locationText, { color: colors.text }]}>Chosen location</ThemedText>
-          <ThemedText style={[styles.locationAddress, { color: colors.text }]}>
-            {state.userLocation?.city || 'Colombo'}, Sri Lanka
-          </ThemedText>
-        </ThemedView>
-        <ThemedView style={styles.locationActions}>
-          <LocationButton
-            onLocationUpdate={handleLocationUpdate}
-            style={[styles.getLocationButton, { backgroundColor: colors.primary }]}
-            textStyle={styles.getLocationText}
-            showText={false}
-          />
-          <TouchableOpacity style={styles.locationButton}>
-            <IconSymbol name="chevron.down" size={16} color={colors.icon} />
-          </TouchableOpacity>
-        </ThemedView>
-      </ThemedView>
-
       {/* Current Location Display */}
       <ThemedView style={styles.locationDisplayContainer}>
         <LocationDisplay showRefreshButton={true} />
@@ -238,6 +264,16 @@ export default function DiscoverScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.horizontalScroll}>
           {nearbyBags.map(renderSurpriseBagCard)}
         </ScrollView>
+      </ThemedView>
+
+      {/* All available near you */}
+      <ThemedView style={styles.sectionContainer}>
+        <ThemedView style={styles.sectionHeader}>
+          <ThemedText style={[styles.sectionTitle, { color: colors.text }]}>Available near you</ThemedText>
+        </ThemedView>
+        <ThemedView style={{ paddingHorizontal: 16, gap: 16 }}>
+          {allBagsInRadius.map(renderSurpriseBagCard)}
+        </ThemedView>
       </ThemedView>
 
       {/* Save before it's too late */}
@@ -363,6 +399,12 @@ const styles = StyleSheet.create({
     height: 120,
   },
   bagImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#F3F4F6',
+  },
+  bagImagePlaceholder: {
     flex: 1,
     backgroundColor: '#F3F4F6',
     justifyContent: 'center',

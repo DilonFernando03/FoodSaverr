@@ -2,6 +2,7 @@ import { createClient } from '@supabase/supabase-js'
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import Constants from 'expo-constants'
 import type { Database } from '@/types/Database'
+import { parsePostGISCoordinates } from './coordinateParser'
 
 // Supabase configuration with fallbacks
 const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || 
@@ -173,6 +174,62 @@ export async function getCurrentUser() {
 }
 
 /**
+ * Check if an email already exists in the database
+ * First tries to use an RPC function that checks both auth.users and our users table
+ * Falls back to checking our users table if RPC is not available
+ */
+async function checkEmailExists(email: string): Promise<boolean> {
+  try {
+    const normalizedEmail = email.toLowerCase().trim();
+    
+    // Method 1: Try to use RPC function to check auth.users (most reliable)
+    try {
+      const { data: exists, error: rpcError } = await supabase.rpc('check_email_exists', {
+        p_email: normalizedEmail
+      });
+      
+      if (!rpcError && exists === true) {
+        console.log('Email found via RPC function:', normalizedEmail);
+        return true;
+      }
+      
+      if (rpcError) {
+        console.log('RPC function not available, falling back to users table check');
+      }
+    } catch (rpcErr) {
+      console.log('RPC function not available, falling back to users table check');
+    }
+    
+    // Method 2: Fallback - Check our users table
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .select('id, email')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
+
+    if (userError) {
+      // PGRST116 = no rows returned (this is expected if email doesn't exist)
+      if (userError.code === 'PGRST116') {
+        return false;
+      }
+      console.error('Error checking email in users table:', userError);
+      return false;
+    }
+
+    if (userData) {
+      console.log('Email found in users table:', normalizedEmail);
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Error checking email existence:', error);
+    // On error, return false to let signup proceed - Supabase Auth will catch duplicates
+    return false;
+  }
+}
+
+/**
  * Sign up a new user
  */
 export async function signUpUser(data: {
@@ -186,16 +243,25 @@ export async function signUpUser(data: {
     business_type: string
     address: string
     city: string
-    coordinates: { lat: number; lng: number }
+    coordinates: { lat: number; lng: number } | null
   }
 }) {
   try {
+    // Step 0: Check if email already exists
+    const emailExists = await checkEmailExists(data.email);
+    if (emailExists) {
+      return { 
+        user: null, 
+        error: new Error('This email is already registered. Please use a different email or try logging in.') 
+      };
+    }
+
     // Step 1: Create auth user first
     const emailRedirectTo = process.env.EXPO_PUBLIC_EMAIL_REDIRECT_TO ||
       (Constants.expoConfig as any)?.extra?.emailRedirectTo
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: data.email,
+      email: data.email.toLowerCase().trim(),
       password: data.password,
       options: {
         data: {
@@ -207,14 +273,58 @@ export async function signUpUser(data: {
       }
     })
 
-    if (authError || !authData.user) {
+    if (authError) {
+      // Check for duplicate email error from Supabase Auth
+      // Supabase Auth may return various error messages for duplicate emails
+      const errorMessage = authError.message?.toLowerCase() || '';
+      const errorCode = authError.status || authError.code || '';
+      
+      if (errorMessage.includes('already registered') || 
+          errorMessage.includes('already exists') ||
+          errorMessage.includes('user already registered') ||
+          errorMessage.includes('email address is already registered') ||
+          errorMessage.includes('email already in use') ||
+          errorCode === 422 || // Unprocessable Entity often means duplicate
+          errorCode === 'user_already_registered') {
+        return { 
+          user: null, 
+          error: new Error('This email is already registered. Please use a different email or try logging in.') 
+        };
+      }
+      
+      // Log the error for debugging
+      console.error('Supabase Auth signup error:', {
+        message: authError.message,
+        status: authError.status,
+        code: authError.code,
+        name: authError.name
+      });
+      
       return { user: null, error: authError }
     }
+    
+    // Additional check: If authData.user exists but we already have this email in our DB,
+    // it means the user was created in auth but might be a duplicate
+    // Check again after auth creation
+    const emailStillExists = await checkEmailExists(data.email);
+    if (emailStillExists && authData.user) {
+      // User was created in auth but email exists in our DB - this shouldn't happen
+      // but if it does, we should clean up and return an error
+      console.warn('Email exists in DB but auth user was created - possible race condition');
+      // Try to delete the auth user (this might not work without admin access)
+      // For now, we'll let it proceed but the RPC function should catch the duplicate
+    }
 
-    // If email confirmation is enabled, there may be no active session yet
+    if (!authData.user) {
+      return { user: null, error: new Error('Failed to create user account') }
+    }
+
+    // If email confirmation is enabled, there may be no active session yet.
+    // At this point Supabase already created the auth user and sent the verification email,
+    // so we should surface the confirmation message instead of re-running the duplicate check.
     if (!authData.session) {
-      // Do NOT create DB rows yet; require email verification first
-      return { user: authData.user, error: new Error('EMAIL_CONFIRMATION_REQUIRED') }
+      console.log('Signup requires email confirmation – verification email sent.');
+      return { user: authData.user, userData: null, error: new Error('EMAIL_CONFIRMATION_REQUIRED') }
     }
 
     // Step 2: Wait a moment for the session to be established (defensive)
@@ -224,7 +334,7 @@ export async function signUpUser(data: {
     console.log('Creating user record using RPC function for ID:', authData.user.id)
     const { data: userDataJson, error: rpcError } = await supabase.rpc('create_user_safe', {
       p_id: authData.user.id,
-      p_email: data.email,
+      p_email: data.email.toLowerCase().trim(),
       p_name: data.name,
       p_user_type: data.user_type,
       p_phone_number: data.phone_number || null,
@@ -240,6 +350,17 @@ export async function signUpUser(data: {
       console.error('Error calling create_user_safe RPC:', rpcError)
       console.error('User ID:', authData.user.id)
       console.error('Email:', data.email)
+      
+      // Check for duplicate key error
+      if (rpcError.message?.includes('duplicate key') || 
+          rpcError.message?.includes('unique constraint') ||
+          rpcError.code === '23505') {
+        return { 
+          user: null, 
+          error: new Error('This email is already registered. Please use a different email or try logging in.') 
+        };
+      }
+      
       return { user: null, error: rpcError }
     }
 
@@ -313,21 +434,30 @@ export async function getAvailableSurpriseBags(filters?: {
   userLocation?: { lat: number; lng: number }
 }) {
   try {
+    // Query bags with shop profiles including coordinates
+    // Use PostGIS functions to extract lat/lng directly as numbers to avoid hex WKB parsing
+    // Show bags from both verified and pending shops (pending shops are new shops awaiting verification)
     let query = supabase
       .from('surprise_bags')
       .select(`
         *,
-        shop_profiles (
+        shop_profiles!inner (
           id,
           business_name,
           logo_url,
           average_rating,
           address,
           city,
-          coordinates
+          coordinates,
+          verification_status
         )
       `)
+      // Add RPC call or use raw SQL to extract coordinates
+      // Note: Supabase PostgREST doesn't support ST_X/ST_Y in select, so we'll parse in JS
       .eq('is_available', true)
+      .eq('is_active', true)
+      .gt('remaining_quantity', 0)
+      .in('shop_profiles.verification_status', ['verified', 'pending'])
       .gte('collection_date', new Date().toISOString().split('T')[0])
       .order('created_at', { ascending: false })
 
@@ -347,19 +477,83 @@ export async function getAvailableSurpriseBags(filters?: {
     const { data, error } = await query
 
     if (error) {
+      console.error('Error fetching surprise bags:', error)
       return { bags: [], error }
     }
 
+    console.log(`Found ${data?.length || 0} bags from database (before distance filtering)`)
+
+    // Filter out bags with no remaining quantity
+    let filteredBags = (data || []).filter(bag => (bag.remaining_quantity || 0) > 0);
+    
+    console.log(`After quantity filter: ${filteredBags.length} bags with items remaining`);
+
     // Apply distance filter if user location is provided
-    let filteredBags = data || []
     if (filters?.userLocation && filters?.maxDistance) {
-      // Note: In a real implementation, you'd use PostGIS distance functions
-      // For now, we'll use a simple approximation
+      // Calculate distance using Haversine formula
+      const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+        const R = 6371 // Earth's radius in kilometers
+        const dLat = (lat2 - lat1) * Math.PI / 180
+        const dLon = (lon2 - lon1) * Math.PI / 180
+        const a = 
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon / 2) * Math.sin(dLon / 2)
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+        return R * c
+      }
+
       filteredBags = filteredBags.filter(bag => {
-        // This is a simplified distance calculation
-        // In production, use proper PostGIS distance queries
-        return true // Placeholder
+        const shop = bag.shop_profiles as any
+        if (!shop || !shop.coordinates) {
+          console.log('Bag filtered out: no shop or coordinates', { bagId: bag.id, shopId: shop?.id })
+          return false
+        }
+        
+        // Extract coordinates from PostGIS geography point using utility function
+        let shopLat: number | null = null
+        let shopLng: number | null = null
+        
+        const parsedCoords = parsePostGISCoordinates(shop.coordinates)
+        if (parsedCoords) {
+          shopLng = parsedCoords.lng
+          shopLat = parsedCoords.lat
+          console.log('Successfully parsed shop coordinates:', { shopLng, shopLat, shopId: shop.id })
+        } else {
+          console.warn('Failed to parse shop coordinates:', { shopId: shop.id, coordinates: shop.coordinates })
+        }
+        
+        if (shopLat === null || shopLng === null) {
+          console.log('Bag filtered out: invalid coordinates', { 
+            bagId: bag.id, 
+            shopId: shop.id,
+            coordinates: shop.coordinates 
+          })
+          return false
+        }
+        
+        const distance = calculateDistance(
+          filters.userLocation!.lat,
+          filters.userLocation!.lng,
+          shopLat,
+          shopLng
+        )
+        
+        const withinRadius = distance <= filters.maxDistance!
+        if (!withinRadius) {
+          console.log('Bag filtered out: distance too far', { 
+            bagId: bag.id, 
+            distance: distance.toFixed(2),
+            maxDistance: filters.maxDistance 
+          })
+        }
+        
+        return withinRadius
       })
+      
+      console.log(`After distance filtering: ${filteredBags.length} bags within ${filters.maxDistance}km`)
+    } else {
+      console.log('No user location provided, showing all bags (no distance filter applied)')
     }
 
     return { bags: filteredBags, error: null }
@@ -392,14 +586,18 @@ export async function createSurpriseBag(bagData: {
       .insert({
         ...bagData,
         remaining_quantity: bagData.total_quantity,
+        is_available: true, // Ensure bag is available when created
+        is_active: true, // Ensure bag is active when created
       })
       .select()
       .single()
 
     if (error) {
+      console.error('Error creating surprise bag:', error)
       return { bag: null, error }
     }
 
+    console.log('Successfully created surprise bag:', data.id)
     return { bag: data, error: null }
   } catch (error) {
     console.error('Error creating surprise bag:', error)

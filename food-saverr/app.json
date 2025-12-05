@@ -6,14 +6,16 @@
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "foodsaverr",
+    "scheme": "food-saverr",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "This app needs access to your location to find nearby food deals and restaurants.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to your location to find nearby food deals and restaurants."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "This app needs access to your location to find nearby food deals and restaurants.",
+        "NSPhotoLibraryUsageDescription": "This app needs access to your photo library to upload bag images.",
+        "NSCameraUsageDescription": "This app needs access to your camera to take photos of bags."
       }
     },
     "android": {
@@ -24,7 +26,9 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION"
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.CAMERA"
       ]
     },
     "web": {
@@ -48,6 +52,13 @@
         {
           "locationAlwaysAndWhenInUsePermission": "This app needs access to your location to find nearby food deals and restaurants.",
           "locationWhenInUsePermission": "This app needs access to your location to find nearby food deals and restaurants."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "The app accesses your photos to let you upload bag images.",
+          "cameraPermission": "The app accesses your camera to let you take photos of bags."
         }
       ]
     ],

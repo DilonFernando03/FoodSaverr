@@ -1,5 +1,8 @@
-import React, { createContext, useContext, useReducer, ReactNode, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, ReactNode, useCallback, useEffect } from 'react';
 import { SurpriseBag, Restaurant, UserLocation, FilterOptions, BagCategory } from '@/types/SurpriseBag';
+import { getAvailableSurpriseBags } from '@/lib/supabase';
+import { useAuth } from '@/contexts/AuthContext';
+import { parsePostGISCoordinates } from '@/lib/coordinateParser';
 
 interface SurpriseBagState {
   bags: SurpriseBag[];
@@ -18,147 +21,10 @@ type SurpriseBagAction =
   | { type: 'TOGGLE_FAVORITE'; payload: string }
   | { type: 'SET_LOADING'; payload: boolean };
 
-// Sample data for Sri Lankan restaurants and surprise bags
-const sampleBags: SurpriseBag[] = [
-  {
-    id: '1',
-    restaurantId: 'rest1',
-    restaurantName: 'Subway - Asda Express Mackworth',
-    restaurantLogo: 'subway',
-    restaurantRating: 4.3,
-    category: BagCategory.BREAD_PASTRIES,
-    title: 'Bread & Cookies',
-    description: 'Fresh bread and cookies that need to go today',
-    originalPrice: 600,
-    discountedPrice: 220,
-    discountPercentage: 63,
-    itemsLeft: 1,
-    collectionTime: { start: '09:30', end: '10:00' },
-    collectionDate: 'tomorrow',
-    distance: 0.549,
-    location: {
-      address: 'Asda Express Mackworth',
-      city: 'Colombo',
-      coordinates: { lat: 6.9271, lng: 79.8612 },
-    },
-    images: ['bread.jpg'],
-    tags: ['bread', 'cookies', 'bakery'],
-    isPopular: false,
-    isFavorited: false,
-    isAvailable: true,
-  },
-  {
-    id: '2',
-    restaurantId: 'rest2',
-    restaurantName: 'ALDI - Burton Road',
-    restaurantLogo: 'aldi',
-    restaurantRating: 4.2,
-    category: BagCategory.GROCERIES,
-    title: 'Grocery Surprise Bag',
-    description: 'Mixed groceries including fresh produce and pantry items',
-    originalPrice: 1000,
-    discountedPrice: 330,
-    discountPercentage: 67,
-    itemsLeft: 3,
-    collectionTime: { start: '21:25', end: '21:55' },
-    collectionDate: 'today',
-    distance: 1.7,
-    location: {
-      address: 'Burton Road, Colombo',
-      city: 'Colombo',
-      coordinates: { lat: 6.9271, lng: 79.8612 },
-    },
-    images: ['groceries.jpg'],
-    tags: ['groceries', 'fresh', 'produce'],
-    isPopular: true,
-    isFavorited: false,
-    isAvailable: true,
-  },
-  {
-    id: '3',
-    restaurantId: 'rest3',
-    restaurantName: 'Pizza Hut - Galle Road',
-    restaurantLogo: 'pizzahut',
-    restaurantRating: 4.5,
-    category: BagCategory.MEALS,
-    title: 'Pizza & Sides',
-    description: 'Leftover pizzas and side dishes from today',
-    originalPrice: 800,
-    discountedPrice: 320,
-    discountPercentage: 60,
-    itemsLeft: 2,
-    collectionTime: { start: '22:00', end: '22:30' },
-    collectionDate: 'today',
-    distance: 2.1,
-    location: {
-      address: 'Galle Road, Colombo',
-      city: 'Colombo',
-      coordinates: { lat: 6.9271, lng: 79.8612 },
-    },
-    images: ['pizza.jpg'],
-    tags: ['pizza', 'italian', 'fast food'],
-    isPopular: true,
-    isFavorited: true,
-    isAvailable: true,
-  },
-  {
-    id: '4',
-    restaurantId: 'rest4',
-    restaurantName: 'KFC - Liberty Plaza',
-    restaurantLogo: 'kfc',
-    restaurantRating: 4.1,
-    category: BagCategory.MEALS,
-    title: 'Chicken & Sides',
-    description: 'Fried chicken and side dishes',
-    originalPrice: 750,
-    discountedPrice: 300,
-    discountPercentage: 60,
-    itemsLeft: 1,
-    collectionTime: { start: '21:45', end: '22:15' },
-    collectionDate: 'today',
-    distance: 1.2,
-    location: {
-      address: 'Liberty Plaza, Colombo',
-      city: 'Colombo',
-      coordinates: { lat: 6.9271, lng: 79.8612 },
-    },
-    images: ['chicken.jpg'],
-    tags: ['chicken', 'fried', 'fast food'],
-    isPopular: false,
-    isFavorited: false,
-    isAvailable: true,
-  },
-  {
-    id: '5',
-    restaurantId: 'rest5',
-    restaurantName: 'Cargills Food City',
-    restaurantLogo: 'cargills',
-    restaurantRating: 4.0,
-    category: BagCategory.FRESH_PRODUCE,
-    title: 'Fresh Produce Bag',
-    description: 'Mixed fresh vegetables and fruits',
-    originalPrice: 500,
-    discountedPrice: 200,
-    discountPercentage: 60,
-    itemsLeft: 4,
-    collectionTime: { start: '20:00', end: '21:00' },
-    collectionDate: 'today',
-    distance: 0.8,
-    location: {
-      address: 'Bambalapitiya, Colombo',
-      city: 'Colombo',
-      coordinates: { lat: 6.9271, lng: 79.8612 },
-    },
-    images: ['produce.jpg'],
-    tags: ['vegetables', 'fruits', 'fresh'],
-    isPopular: false,
-    isFavorited: false,
-    isAvailable: true,
-  },
-];
+// Remove sample data; bags will be loaded from Supabase
 
 const initialState: SurpriseBagState = {
-  bags: sampleBags,
+  bags: [],
   restaurants: [],
   userLocation: null,
   filters: {
@@ -231,6 +97,124 @@ const SurpriseBagContext = createContext<SurpriseBagContextType | undefined>(und
 
 export function SurpriseBagProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(surpriseBagReducer, initialState);
+  const { user } = useAuth();
+
+  // Compute Haversine distance in km
+  const computeDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const toRad = (v: number) => (v * Math.PI) / 180;
+    const R = 6371; // km
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round((R * c) * 1000) / 1000; // round to meters precision
+  };
+
+  // Load bags from Supabase whenever filters or location change
+  useEffect(() => {
+    const load = async () => {
+      dispatch({ type: 'SET_LOADING', payload: true });
+      try {
+        // Use customer's maxDistance preference if available, otherwise use filter default
+        const customerMaxDistance = user?.userType === 'customer' 
+          ? (user as any).preferences?.maxDistance 
+          : undefined;
+        const maxDistance = customerMaxDistance || state.filters.maxDistance;
+
+        console.log('Loading bags with filters:', {
+          category: state.filters.category,
+          maxDistance,
+          hasUserLocation: !!state.userLocation,
+          userLocation: state.userLocation?.coordinates,
+        });
+
+        // Always fetch bags, even without location (distance filtering will be applied if location exists)
+        const { bags, error } = await getAvailableSurpriseBags({
+          category: state.filters.category || undefined,
+          maxPrice: state.filters.maxPrice || undefined,
+          minRating: state.filters.minRating || undefined,
+          // Only apply distance filter if user location is available
+          maxDistance: state.userLocation ? maxDistance : undefined,
+          userLocation: state.userLocation ? { lat: state.userLocation.coordinates.lat, lng: state.userLocation.coordinates.lng } : undefined,
+        } as any);
+
+        if (error) {
+          console.error('Error loading bags:', error);
+          dispatch({ type: 'SET_BAGS', payload: [] });
+          dispatch({ type: 'SET_LOADING', payload: false });
+          return;
+        }
+
+        console.log(`Loaded ${bags?.length || 0} bags from database`);
+
+        const mapped: SurpriseBag[] = (bags || []).map((row: any) => {
+          const shop = row.shop_profiles || {};
+          const coords = shop.coordinates as any;
+          
+          // Extract coordinates from PostGIS geography point using utility function
+          let shopLat: number | null = null;
+          let shopLng: number | null = null;
+          
+          const parsedCoords = parsePostGISCoordinates(coords);
+          if (parsedCoords) {
+            shopLng = parsedCoords.lng;
+            shopLat = parsedCoords.lat;
+          }
+          
+          let distance = 0;
+          if (state.userLocation && shopLat != null && shopLng != null) {
+            distance = computeDistanceKm(
+              state.userLocation.coordinates.lat,
+              state.userLocation.coordinates.lng,
+              shopLat,
+              shopLng
+            );
+          }
+          const itemsLeft = row.remaining_quantity ?? row.total_quantity ?? 0;
+          const discountedPrice = row.discounted_price ?? 0;
+          const originalPrice = row.original_price ?? discountedPrice;
+          const discountPercentage = originalPrice ? Math.round(((originalPrice - discountedPrice) / originalPrice) * 100) : 0;
+          return {
+            id: row.id,
+            restaurantId: row.shop_id,
+            restaurantName: shop.business_name || 'Shop',
+            restaurantLogo: shop.logo_url || '',
+            restaurantRating: shop.average_rating || 0,
+            category: row.category as BagCategory,
+            title: row.title,
+            description: row.description || '',
+            originalPrice,
+            discountedPrice,
+            discountPercentage,
+            itemsLeft,
+            collectionTime: { start: row.collection_start_time || '', end: row.collection_end_time || '' },
+            collectionDate: row.collection_date || '',
+            distance,
+            location: {
+              address: shop.address || '',
+              city: shop.city || '',
+              coordinates: { lat: shopLat ?? 0, lng: shopLng ?? 0 },
+            },
+            images: row.images || [],
+            tags: row.tags || [],
+            isPopular: false,
+            isFavorited: false,
+            isAvailable: row.is_available ?? true,
+          } as SurpriseBag;
+        });
+
+        console.log(`Mapped ${mapped.length} bags for display`);
+        dispatch({ type: 'SET_BAGS', payload: mapped });
+      } catch (error) {
+        console.error('Error in load bags:', error);
+        dispatch({ type: 'SET_BAGS', payload: [] });
+      } finally {
+        dispatch({ type: 'SET_LOADING', payload: false });
+      }
+    };
+
+    load();
+  }, [state.filters.category, state.filters.maxPrice, state.filters.minRating, state.filters.maxDistance, state.userLocation, user]);
 
   const getFilteredBags = useCallback((): SurpriseBag[] => {
     let filtered = state.bags;
