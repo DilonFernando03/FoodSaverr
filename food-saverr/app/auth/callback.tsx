@@ -159,6 +159,38 @@ export default function AuthCallbackScreen() {
 
       console.log('Session set successfully, user ID:', session.user.id);
 
+      // If email was just verified, update shop verification status
+      if (session.user.email_confirmed_at) {
+        try {
+          // Check if user is a shop
+          const { data: userData } = await supabase
+            .from('users')
+            .select('user_type')
+            .eq('id', session.user.id)
+            .maybeSingle();
+
+          if (userData?.user_type === 'shop') {
+            // Update shop verification status to verified
+            const { error } = await supabase
+              .from('shop_profiles')
+              .update({
+                verification_status: 'verified',
+                verified_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', session.user.id);
+
+            if (error) {
+              console.error('Error updating shop verification status:', error);
+            } else {
+              console.log('Shop verification status updated to verified');
+            }
+          }
+        } catch (error) {
+          console.error('Error updating shop verification:', error);
+        }
+      }
+
       // AuthContext will automatically refresh via onAuthStateChange listener
       // Give it a moment to process
       await new Promise(resolve => setTimeout(resolve, 500));

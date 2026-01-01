@@ -63,6 +63,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else if (event === 'SIGNED_IN' && session) {
         // Refresh user data on sign in
         await checkAuthStatus();
+      } else if (event === 'TOKEN_REFRESHED' && session) {
+        // Check if email was just verified and update shop verification status
+        if (session.user.email_confirmed_at) {
+          await updateShopVerificationOnEmailConfirm(session.user.id);
+        }
+        await checkAuthStatus();
+      } else if (event === 'USER_UPDATED' && session) {
+        // Email verification might trigger this event
+        if (session.user.email_confirmed_at) {
+          await updateShopVerificationOnEmailConfirm(session.user.id);
+        }
+        await checkAuthStatus();
       }
     });
 
@@ -70,6 +82,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authListener?.subscription.unsubscribe();
     };
   }, []);
+
+  // Update shop verification status when email is confirmed
+  const updateShopVerificationOnEmailConfirm = async (userId: string) => {
+    try {
+      // Check if user is a shop
+      const { data: userData } = await supabase
+        .from('users')
+        .select('user_type')
+        .eq('id', userId)
+        .maybeSingle();
+
+      if (userData?.user_type === 'shop') {
+        // Update shop verification status to verified
+        const { error } = await supabase
+          .from('shop_profiles')
+          .update({
+            verification_status: 'verified',
+            verified_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', userId);
+
+        if (error) {
+          console.error('Error updating shop verification status:', error);
+        } else {
+          console.log('Shop verification status updated to verified');
+        }
+      }
+    } catch (error) {
+      console.error('Error in updateShopVerificationOnEmailConfirm:', error);
+    }
+  };
 
   const checkAuthStatus = async () => {
     try {
@@ -99,6 +143,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       let user: Customer | Shop;
 
       if (userData.user_type === 'shop') {
+        // Check if email is confirmed and update verification status if needed
+        let updatedProfile = profile;
+        if (authUser?.email_confirmed_at && profile?.verification_status === 'pending') {
+          await updateShopVerificationOnEmailConfirm(userData.id);
+          // Refresh profile to get updated verification status
+          const { data: refreshedProfile } = await supabase
+            .from('shop_profiles')
+            .select('*')
+            .eq('id', userData.id)
+            .maybeSingle();
+          if (refreshedProfile) {
+            updatedProfile = refreshedProfile;
+          }
+        }
+
         user = {
           id: userData.id,
           email: userData.email,
@@ -108,18 +167,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           lastLoginAt: new Date(userData.last_login_at || userData.created_at),
           isActive: true,
           businessInfo: {
-            businessName: profile?.business_name || '',
-            businessType: profile?.business_type || '',
-            description: profile?.description || '',
+            businessName: updatedProfile?.business_name || '',
+            businessType: updatedProfile?.business_type || '',
+            description: updatedProfile?.description || '',
             phoneNumber: userData.phone_number || '',
           },
           location: {
-            address: profile?.address || '',
-            city: profile?.city || '',
-            postalCode: profile?.postal_code || '',
-            coordinates: profile?.coordinates ? (() => {
+            address: updatedProfile?.address || '',
+            city: updatedProfile?.city || '',
+            postalCode: updatedProfile?.postal_code || '',
+            coordinates: updatedProfile?.coordinates ? (() => {
               // Parse coordinates from PostGIS geography point
-              const coords = profile.coordinates as any;
+              const coords = updatedProfile.coordinates as any;
               if (typeof coords === 'string') {
                 const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
                 if (match) {
@@ -138,23 +197,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               return null;
             })() : null,
           },
-          operatingHours: profile?.operating_hours || {},
+          operatingHours: updatedProfile?.operating_hours || {},
           verificationStatus: {
-            isVerified: profile?.is_verified || false,
-            verifiedAt: profile?.verified_at ? new Date(profile.verified_at) : undefined,
+            isVerified: updatedProfile?.verification_status === 'verified',
+            verifiedAt: updatedProfile?.verified_at ? new Date(updatedProfile.verified_at) : undefined,
+            documents: updatedProfile?.verification_documents || [],
           },
           rating: {
-            average: profile?.average_rating || 0,
-            totalReviews: profile?.total_reviews || 0,
+            average: updatedProfile?.average_rating || 0,
+            totalReviews: updatedProfile?.total_reviews || 0,
           },
           settings: {
-            autoPostBags: false,
-            defaultBagQuantity: 5,
-            defaultDiscountPercentage: 60,
+            autoPostBags: updatedProfile?.auto_post_bags || false,
+            defaultBagQuantity: updatedProfile?.default_bag_quantity || 5,
+            defaultDiscountPercentage: updatedProfile?.default_discount_percentage || 60,
             notificationSettings: {
-              newOrders: true,
-              lowStock: true,
-              reviews: true,
+              newOrders: updatedProfile?.notifications_new_orders ?? true,
+              lowStock: updatedProfile?.notifications_low_stock ?? true,
+              reviews: updatedProfile?.notifications_reviews ?? true,
             },
           },
         } as Shop;

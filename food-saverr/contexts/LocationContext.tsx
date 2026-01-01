@@ -1,9 +1,12 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { Alert } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import LocationService, { LocationData } from '@/services/LocationService';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { Shop, UserType } from '@/types/User';
+
+const LOCATION_STORAGE_KEY = 'user_location';
 
 interface LocationContextType {
   location: LocationData | null;
@@ -28,11 +31,35 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
   const [error, setError] = useState<string | null>(null);
   const [isLocationEnabled, setIsLocationEnabled] = useState<boolean>(false);
   const { user, updateUser } = useAuth();
+  const isInitializingRef = React.useRef<boolean>(false);
+  const isFetchingLocationRef = React.useRef<boolean>(false);
 
   const locationService = LocationService.getInstance();
 
+  // Save location to AsyncStorage
+  const saveLocationToStorage = async (locationData: LocationData) => {
+    try {
+      await AsyncStorage.setItem(LOCATION_STORAGE_KEY, JSON.stringify(locationData));
+    } catch (err) {
+      console.error('Error saving location to storage:', err);
+    }
+  };
+
+  // Load location from AsyncStorage
+  const loadLocationFromStorage = async (): Promise<LocationData | null> => {
+    try {
+      const savedLocation = await AsyncStorage.getItem(LOCATION_STORAGE_KEY);
+      if (savedLocation) {
+        return JSON.parse(savedLocation) as LocationData;
+      }
+    } catch (err) {
+      console.error('Error loading location from storage:', err);
+    }
+    return null;
+  };
+
   // Save customer location to database
-  const saveCustomerLocation = async (locationData: LocationData) => {
+  const saveCustomerLocation = useCallback(async (locationData: LocationData) => {
     if (!user || user.userType !== 'customer') {
       return; // Only save for customers
     }
@@ -68,9 +95,9 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
     } catch (err) {
       console.error('Error in saveCustomerLocation:', err);
     }
-  };
+  }, [user]);
 
-  const saveShopLocation = async (locationData: LocationData) => {
+  const saveShopLocation = useCallback(async (locationData: LocationData) => {
     if (!user || user.userType !== UserType.SHOP) {
       return;
     }
@@ -109,9 +136,16 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
       console.error('Error in saveShopLocation:', err);
       Alert.alert('Location Error', 'Failed to save shop location. Please try again.');
     }
-  };
+  }, [user, updateUser]);
 
-  const getCurrentLocation = async (): Promise<LocationData | null> => {
+  const getCurrentLocation = useCallback(async (silent = false): Promise<LocationData | null> => {
+    // Prevent multiple simultaneous location fetches
+    if (isFetchingLocationRef.current) {
+      console.log('Location fetch already in progress, skipping...');
+      return null; // Return null if already fetching to avoid race conditions
+    }
+
+    isFetchingLocationRef.current = true;
     setLoading(true);
     setError(null);
 
@@ -120,6 +154,10 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
       setLocation(currentLocation);
       setIsLocationEnabled(true);
       
+      // Save to AsyncStorage for persistence
+      await saveLocationToStorage(currentLocation);
+      
+      // Save to database if user is logged in
       if (user) {
         if (user.userType === UserType.CUSTOMER) {
           await saveCustomerLocation(currentLocation);
@@ -134,45 +172,118 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
       setError(errorMessage);
       setIsLocationEnabled(false);
       
-      // Show user-friendly error alert
-      Alert.alert(
-        'Location Error',
-        errorMessage,
-        [
-          {
-            text: 'OK',
-            style: 'default',
-          },
-        ]
-      );
+      // Only show alert if not silent (silent is used for automatic requests)
+      if (!silent) {
+        Alert.alert(
+          'Location Error',
+          errorMessage,
+          [
+            {
+              text: 'OK',
+              style: 'default',
+            },
+          ]
+        );
+      }
       return null;
     } finally {
       setLoading(false);
+      isFetchingLocationRef.current = false;
     }
-  };
+  }, [user, locationService, saveCustomerLocation, saveShopLocation]);
 
   const refreshLocation = async (): Promise<LocationData | null> => {
     return await getCurrentLocation();
   };
 
-  // Check if location services are available on mount
+  // Load saved location and request permission on mount
   useEffect(() => {
-    const checkLocationAvailability = async () => {
+    // Prevent multiple simultaneous initializations
+    if (isInitializingRef.current) {
+      return;
+    }
+
+    const initializeLocation = async () => {
+      isInitializingRef.current = true;
+
       try {
+        // First, try to load saved location from AsyncStorage
+        const savedLocation = await loadLocationFromStorage();
+        if (savedLocation) {
+          setLocation(savedLocation);
+          console.log('Loaded saved location from storage');
+        }
+
+        // Only proceed if user is logged in
+        if (!user) {
+          isInitializingRef.current = false;
+          return;
+        }
+
+        // Check if location services are available
         const isEnabled = await locationService.isLocationEnabled();
         setIsLocationEnabled(isEnabled);
+
+        // If permission is granted, automatically fetch fresh location
+        if (isEnabled) {
+          // Silently fetch location in background (won't show error alerts)
+          try {
+            const currentLocation = await locationService.getCurrentLocation();
+            setLocation(currentLocation);
+            
+            // Save to AsyncStorage for persistence
+            await saveLocationToStorage(currentLocation);
+            
+            // Save to database
+            if (user.userType === UserType.CUSTOMER) {
+              await saveCustomerLocation(currentLocation);
+            } else if (user.userType === UserType.SHOP) {
+              await saveShopLocation(currentLocation);
+            }
+          } catch (err: any) {
+            console.error('Error fetching location on initialization:', err);
+            // Keep the saved location if fresh fetch fails
+          }
+        } else {
+          // If permission is not granted, try to request it (but only once)
+          try {
+            const hasPermission = await locationService.requestLocationPermission();
+            if (hasPermission) {
+              setIsLocationEnabled(true);
+              // Fetch location after permission is granted
+              try {
+                const currentLocation = await locationService.getCurrentLocation();
+                setLocation(currentLocation);
+                
+                // Save to AsyncStorage for persistence
+                await saveLocationToStorage(currentLocation);
+                
+                // Save to database
+                if (user.userType === UserType.CUSTOMER) {
+                  await saveCustomerLocation(currentLocation);
+                } else if (user.userType === UserType.SHOP) {
+                  await saveShopLocation(currentLocation);
+                }
+              } catch (err: any) {
+                console.error('Error fetching location after permission grant:', err);
+              }
+            }
+          } catch (error) {
+            // Permission request failed or was denied
+            console.log('Location permission not granted');
+          }
+        }
       } catch (error) {
+        console.error('Error initializing location:', error);
         setIsLocationEnabled(false);
+      } finally {
+        isInitializingRef.current = false;
       }
     };
 
-    checkLocationAvailability();
-
-    if (user?.userType === UserType.CUSTOMER) {
-      // Automatically capture location for customers to personalise bag listings
-      getCurrentLocation();
-    }
-  }, [locationService, user?.userType]);
+    initializeLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]); // Only re-run when user.id changes, not on every user object change
 
   const value: LocationContextType = {
     location,

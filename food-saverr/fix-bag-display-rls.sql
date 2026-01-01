@@ -31,3 +31,11 @@ CREATE POLICY "Anyone can view verified shops" ON shop_profiles FOR SELECT USING
 
 
 
+
+
+
+
+
+
+
+

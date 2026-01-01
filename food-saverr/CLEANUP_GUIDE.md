@@ -46,3 +46,11 @@ These might be useful to keep for future reference:
 **URL:** `https://dilonfernando03.github.io/FoodSaverr/email-verification/`
 **Status:** Working perfectly!
 
+
+
+
+
+
+
+
+

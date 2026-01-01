@@ -16,6 +16,8 @@ import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { BagCategory } from '@/types/SurpriseBag';
+import { LocationButton } from '@/components/LocationButton';
+import { useLocationContext } from '@/contexts/LocationContext';
 
 export default function ShopDashboardScreen() {
   const { user } = useAuth();
@@ -27,6 +29,7 @@ export default function ShopDashboardScreen() {
     getAnalytics,
     loading 
   } = useShop();
+  const { location } = useLocationContext();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
@@ -35,6 +38,19 @@ export default function ShopDashboardScreen() {
   const shop = user?.userType === 'shop' ? user : null;
   const activeBags = getActiveBags();
   const todaysBags = getTodaysBags();
+
+  // Check if shop location coordinates are set
+  const hasShopLocation = shop?.location?.coordinates && 
+    (shop.location.coordinates.lat !== 0 || shop.location.coordinates.lng !== 0);
+
+  const handleLocationUpdate = (coords: { latitude: number; longitude: number; city?: string }) => {
+    if (!coords) return;
+    const messageParts: string[] = [];
+    if (coords.city) {
+      messageParts.push(coords.city);
+    }
+    Alert.alert('Location Updated', `Shop location saved${messageParts.length > 0 ? ` at ${messageParts.join(' · ')}` : ''}. Customers can now find you.`);
+  };
 
   useEffect(() => {
     if (shop) {
@@ -140,11 +156,35 @@ export default function ShopDashboardScreen() {
         </View>
       </View>
 
+      {/* Location Setup - Always show on dashboard */}
+      <View style={styles.locationSection}>
+        <View style={[styles.locationCard, { backgroundColor: colors.cardBackground }]}>
+          <View style={styles.locationContent}>
+            <IconSymbol name="location.fill" size={24} color={colors.tint} />
+            <View style={styles.locationTextContainer}>
+              <Text style={[styles.locationTitle, { color: colors.text }]}>
+                {hasShopLocation ? 'Update Shop Location' : 'Set Your Shop Location'}
+              </Text>
+              <Text style={[styles.locationSubtitle, { color: colors.text }]}>
+                {hasShopLocation 
+                  ? 'Update your shop location so customers can find you'
+                  : 'Help customers find your shop by setting your location'}
+              </Text>
+            </View>
+          </View>
+          <LocationButton
+            showText
+            style={[styles.locationButton, { backgroundColor: colors.tint, borderColor: colors.tint }]}
+            onLocationUpdate={handleLocationUpdate}
+          />
+        </View>
+      </View>
+
       {/* Today's Overview */}
       <View style={styles.overviewSection}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Today's Overview</Text>
         <View style={styles.statsContainer}>
-          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+          <View style={[styles.statCard, { backgroundColor: colors.cardBackground }]}>
             <View style={[styles.statIconContainer, { backgroundColor: colors.tint + '20' }]}>
               <IconSymbol name="bag.fill" size={24} color={colors.tint} />
             </View>
@@ -156,7 +196,7 @@ export default function ShopDashboardScreen() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+          <View style={[styles.statCard, { backgroundColor: colors.cardBackground }]}>
             <View style={[styles.statIconContainer, { backgroundColor: '#FF9500' + '20' }]}>
               <IconSymbol name="clock.fill" size={24} color="#FF9500" />
             </View>
@@ -168,7 +208,7 @@ export default function ShopDashboardScreen() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+          <View style={[styles.statCard, { backgroundColor: colors.cardBackground }]}>
             <View style={[styles.statIconContainer, { backgroundColor: '#34C759' + '20' }]}>
               <IconSymbol name="dollarsign.circle.fill" size={24} color="#34C759" />
             </View>
@@ -180,7 +220,7 @@ export default function ShopDashboardScreen() {
             </Text>
           </View>
 
-          <View style={[styles.statCard, { backgroundColor: colors.card }]}>
+          <View style={[styles.statCard, { backgroundColor: colors.cardBackground }]}>
             <View style={[styles.statIconContainer, { backgroundColor: '#FFD700' + '20' }]}>
               <IconSymbol name="star.fill" size={24} color="#FFD700" />
             </View>
@@ -212,7 +252,7 @@ export default function ShopDashboardScreen() {
 
           <View style={styles.secondaryActions}>
             <TouchableOpacity
-              style={[styles.secondaryAction, { backgroundColor: colors.card }]}
+              style={[styles.secondaryAction, { backgroundColor: colors.cardBackground }]}
               onPress={() => router.push('/(shop-tabs)/bags')}
             >
               <View style={[styles.actionIconContainer, { backgroundColor: colors.tint + '20' }]}>
@@ -224,7 +264,7 @@ export default function ShopDashboardScreen() {
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={[styles.secondaryAction, { backgroundColor: colors.card }]}
+              style={[styles.secondaryAction, { backgroundColor: colors.cardBackground }]}
               onPress={() => router.push('/(shop-tabs)/orders')}
             >
               <View style={[styles.actionIconContainer, { backgroundColor: '#FF9500' + '20' }]}>
@@ -244,7 +284,7 @@ export default function ShopDashboardScreen() {
             Today's Performance
           </Text>
           
-          <View style={[styles.analyticsCard, { backgroundColor: colors.card }]}>
+          <View style={[styles.analyticsCard, { backgroundColor: colors.cardBackground }]}>
             <View style={styles.analyticsRow}>
               <View style={styles.analyticsItem}>
                 <Text style={[styles.analyticsValue, { color: colors.tint }]}>
@@ -284,7 +324,7 @@ export default function ShopDashboardScreen() {
         
         {activeBags.length > 0 ? (
           activeBags.slice(0, 3).map((bag) => (
-            <View key={bag.id} style={[styles.activityItem, { backgroundColor: colors.card }]}>
+            <View key={bag.id} style={[styles.activityItem, { backgroundColor: colors.cardBackground }]}>
               <View style={styles.activityContent}>
                 <Text style={[styles.activityTitle, { color: colors.text }]}>
                   {bag.title}
@@ -301,7 +341,7 @@ export default function ShopDashboardScreen() {
             </View>
           ))
         ) : (
-          <View style={[styles.emptyState, { backgroundColor: colors.card }]}>
+          <View style={[styles.emptyState, { backgroundColor: colors.cardBackground }]}>
             <IconSymbol name="bag" size={48} color={colors.tabIconDefault} />
             <Text style={[styles.emptyStateText, { color: colors.text }]}>
               No active bags yet
@@ -383,6 +423,37 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  locationSection: {
+    paddingHorizontal: 20,
+    marginBottom: 20,
+    marginTop: 20,
+  },
+  locationCard: {
+    padding: 20,
+    borderRadius: 16,
+    gap: 16,
+  },
+  locationContent: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  locationTextContainer: {
+    flex: 1,
+  },
+  locationTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  locationSubtitle: {
+    fontSize: 14,
+    opacity: 0.7,
+    lineHeight: 20,
+  },
+  locationButton: {
+    alignSelf: 'flex-start',
   },
   overviewSection: {
     paddingHorizontal: 20,

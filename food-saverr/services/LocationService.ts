@@ -32,7 +32,7 @@ class LocationService {
   /**
    * Request location permissions
    */
-  private async requestLocationPermission(): Promise<boolean> {
+  public async requestLocationPermission(): Promise<boolean> {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       return status === 'granted';
@@ -47,8 +47,13 @@ class LocationService {
    */
   public async getCurrentLocation(): Promise<LocationData> {
     try {
-      // Request permission first
-      const hasPermission = await this.requestLocationPermission();
+      // Check if permission is already granted first
+      let hasPermission = await this.isLocationEnabled();
+      
+      // Only request permission if not already granted
+      if (!hasPermission) {
+        hasPermission = await this.requestLocationPermission();
+      }
       
       if (!hasPermission) {
         throw new Error('Location permission denied');
