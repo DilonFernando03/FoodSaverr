@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -15,41 +16,205 @@ import { useShop } from '@/contexts/ShopContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { IconSymbol } from '@/components/ui/IconSymbol';
-import { BagCategory } from '@/types/SurpriseBag';
-import { LocationButton } from '@/components/LocationButton';
 import { useLocationContext } from '@/contexts/LocationContext';
+import LocationService from '@/services/LocationService';
+import { supabase } from '@/lib/supabase';
 
 export default function ShopDashboardScreen() {
-  const { user } = useAuth();
+  const { user, updateUser, login } = useAuth();
   const { 
     getActiveBags, 
     getTodaysBags, 
-    createBag,
     analytics,
     getAnalytics,
     loading 
   } = useShop();
-  const { location } = useLocationContext();
+  const { location, getCurrentLocation, isLocationEnabled } = useLocationContext();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const [refreshing, setRefreshing] = useState(false);
+  const [locationPermissionChecked, setLocationPermissionChecked] = useState(false);
 
   const shop = user?.userType === 'shop' ? user : null;
   const activeBags = getActiveBags();
   const todaysBags = getTodaysBags();
+  const [locationPermissionDenied, setLocationPermissionDenied] = useState(false);
 
-  // Check if shop location coordinates are set
-  const hasShopLocation = shop?.location?.coordinates && 
-    (shop.location.coordinates.lat !== 0 || shop.location.coordinates.lng !== 0);
+  // Check if shop location is available (coordinates, address, or city)
+  const hasShopLocation = shop?.location && (
+    (shop.location.coordinates && 
+     shop.location.coordinates.lat !== null && 
+     shop.location.coordinates.lng !== null &&
+     (shop.location.coordinates.lat !== 0 || shop.location.coordinates.lng !== 0)) ||
+    (shop.location.address && shop.location.address.trim() !== '') ||
+    (shop.location.city && shop.location.city.trim() !== '')
+  );
 
-  const handleLocationUpdate = (coords: { latitude: number; longitude: number; city?: string }) => {
-    if (!coords) return;
-    const messageParts: string[] = [];
-    if (coords.city) {
-      messageParts.push(coords.city);
+  // Check permission status to determine if we should show location
+  useEffect(() => {
+    const checkPermission = async () => {
+      if (!shop) return;
+      try {
+        const locationService = LocationService.getInstance();
+        const permissionResult = await locationService.checkLocationPermission();
+        setLocationPermissionDenied(permissionResult.status === 'denied');
+      } catch (error) {
+        // If permission check fails, assume not denied
+        setLocationPermissionDenied(false);
+      }
+    };
+    checkPermission();
+  }, [shop]);
+
+  // Automatically request location based on permission status
+  useEffect(() => {
+    if (!shop || locationPermissionChecked) return;
+
+    const checkAndRequestLocation = async () => {
+      setLocationPermissionChecked(true);
+      const locationService = LocationService.getInstance();
+      
+      try {
+        // Check current permission status
+        const permissionResult = await locationService.checkLocationPermission();
+        
+        if (permissionResult.status === 'granted' && permissionResult.canSave) {
+          // "Allow While Using App" - automatically get location
+          try {
+            const locationResult = await locationService.getCurrentLocation();
+            const { permissionStatus, ...locationData } = locationResult;
+            
+            if (permissionStatus.canSave && locationData) {
+              await handleLocationUpdate(locationData);
+            }
+          } catch (error: any) {
+            // Don't log console errors for permission denial
+            const errorMessage = error?.message || '';
+            const isPermissionDenied = errorMessage.toLowerCase().includes('permission') || 
+                                        errorMessage.toLowerCase().includes('denied');
+            if (!isPermissionDenied) {
+              console.error('Error getting location automatically:', error);
+            }
+          }
+        } else if (permissionResult.status === 'ephemeral' || permissionResult.status === 'undetermined') {
+          // "Allow Once" or not determined - request permission
+          const newPermissionResult = await locationService.requestLocationPermission();
+          
+          if (newPermissionResult.status === 'granted' && newPermissionResult.canSave) {
+            // User selected "Allow While Using App"
+            try {
+              const locationResult = await locationService.getCurrentLocation();
+              const { permissionStatus, ...locationData } = locationResult;
+              
+              if (permissionStatus.canSave && locationData) {
+                await handleLocationUpdate(locationData);
+              }
+            } catch (error: any) {
+              // Don't log console errors for permission denial
+              const errorMessage = error?.message || '';
+              const isPermissionDenied = errorMessage.toLowerCase().includes('permission') || 
+                                          errorMessage.toLowerCase().includes('denied');
+              if (!isPermissionDenied) {
+                console.error('Error getting location after permission grant:', error);
+              }
+            }
+          } else if (newPermissionResult.status === 'ephemeral') {
+            // User selected "Allow Once" - silently continue without saving automatically
+            // No alert shown as user made their choice
+          } else if (newPermissionResult.status === 'denied') {
+            // User selected "Don't Allow"
+            Alert.alert(
+              'Location Access Denied',
+              'Location access is currently set to "Never". Please enable location access in Settings to create bags and help customers find your shop.',
+              [{ text: 'OK' }]
+            );
+          }
+        } else if (permissionResult.status === 'denied') {
+          // Permission denied - don't request again
+          Alert.alert(
+            'Location Access Denied',
+            'Location access is currently set to "Never". Please enable location access in Settings to create bags and help customers find your shop.',
+            [{ text: 'OK' }]
+          );
+        }
+      } catch (error: any) {
+        // Don't log console errors for permission denial
+        const errorMessage = error?.message || '';
+        const isPermissionDenied = errorMessage.toLowerCase().includes('permission') || 
+                                    errorMessage.toLowerCase().includes('denied');
+        if (!isPermissionDenied) {
+          console.error('Error checking location permission:', error);
+        }
+      }
+    };
+
+    checkAndRequestLocation();
+  }, [shop, locationPermissionChecked]);
+
+  const handleLocationUpdate = async (locationData: { latitude: number; longitude: number; city?: string }) => {
+    if (!locationData || !shop) return;
+    
+    try {
+      // Update shop profile with coordinates using PostGIS format
+      const { error: updateError } = await supabase
+        .from('shop_profiles')
+        .update({
+          coordinates: `SRID=4326;POINT(${locationData.longitude} ${locationData.latitude})`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', shop.id);
+
+      if (updateError) {
+        console.error('Error updating coordinates:', updateError);
+        return;
+      }
+
+      // Update city if provided
+      const updatedCity = locationData.city || shop.location.city;
+      if (locationData.city && locationData.city !== shop.location.city) {
+        const { error: cityError } = await supabase
+          .from('shop_profiles')
+          .update({
+            city: locationData.city,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', shop.id);
+
+        if (cityError) {
+          console.error('Error updating city:', cityError);
+        }
+      }
+
+      // Update local user state to reflect the change
+      if (user && user.userType === 'shop' && shop) {
+        const addressToUse = shop.location.address?.trim() || updatedCity || 'Location set';
+        
+        const updatedShop = {
+          ...user,
+          location: {
+            ...user.location,
+            coordinates: {
+              lat: locationData.latitude,
+              lng: locationData.longitude,
+            },
+            city: updatedCity || user.location.city || 'Location',
+            address: addressToUse,
+          },
+        };
+        
+        try {
+          await updateUser(updatedShop);
+        } catch (error: any) {
+          console.log('Local state update failed, but database is updated:', error);
+        }
+      }
+
+      // Refresh the page data
+      await getAnalytics();
+    } catch (error) {
+      console.error('Error updating location:', error);
     }
-    Alert.alert('Location Updated', `Shop location saved${messageParts.length > 0 ? ` at ${messageParts.join(' · ')}` : ''}. Customers can now find you.`);
   };
 
   useEffect(() => {
@@ -64,47 +229,6 @@ export default function ShopDashboardScreen() {
     setRefreshing(false);
   };
 
-  const handleQuickCreateBag = () => {
-    Alert.alert(
-      'Quick Create Bag',
-      'Choose a category for your surprise bag',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Meals', onPress: () => createQuickBag(BagCategory.MEALS) },
-        { text: 'Bread & Pastries', onPress: () => createQuickBag(BagCategory.BREAD_PASTRIES) },
-        { text: 'Groceries', onPress: () => createQuickBag(BagCategory.GROCERIES) },
-        { text: 'Fresh Produce', onPress: () => createQuickBag(BagCategory.FRESH_PRODUCE) },
-      ]
-    );
-  };
-
-  const createQuickBag = async (category: BagCategory) => {
-    try {
-      await createBag({
-        shopId: shop?.id || '',
-        category,
-        title: `Quick ${category.replace('_', ' ').toUpperCase()} Bag`,
-        description: `Fresh ${category.replace('_', ' ')} items available today`,
-        originalPrice: 500,
-        discountedPrice: 200,
-        discountPercentage: 60,
-        totalQuantity: 5,
-        remainingQuantity: 5,
-        collectionTime: {
-          start: '18:00',
-          end: '20:00',
-        },
-        collectionDate: new Date().toISOString().split('T')[0],
-        images: [],
-        tags: [category],
-        isActive: true,
-        isAvailable: true,
-      });
-      Alert.alert('Success', 'Bag created successfully!');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to create bag');
-    }
-  };
 
   if (!shop) {
     return (
@@ -139,6 +263,18 @@ export default function ShopDashboardScreen() {
               <Text style={styles.businessName}>
                 {shop.businessInfo.businessName}
               </Text>
+              {hasShopLocation && (
+                <View style={styles.locationHeaderContainer}>
+                  <IconSymbol name="location.fill" size={12} color="rgba(255, 255, 255, 0.9)" />
+                  <Text style={styles.locationHeaderText}>
+                    {shop.location.address 
+                      ? (shop.location.city && shop.location.city !== shop.location.address 
+                          ? `${shop.location.address}, ${shop.location.city}` 
+                          : shop.location.address)
+                      : (shop.location.city || 'Location set')}
+                  </Text>
+                </View>
+              )}
               <View style={styles.ratingContainer}>
                 <IconSymbol name="star.fill" size={14} color="#FFD700" />
                 <Text style={styles.rating}>
@@ -156,29 +292,6 @@ export default function ShopDashboardScreen() {
         </View>
       </View>
 
-      {/* Location Setup - Always show on dashboard */}
-      <View style={styles.locationSection}>
-        <View style={[styles.locationCard, { backgroundColor: colors.cardBackground }]}>
-          <View style={styles.locationContent}>
-            <IconSymbol name="location.fill" size={24} color={colors.tint} />
-            <View style={styles.locationTextContainer}>
-              <Text style={[styles.locationTitle, { color: colors.text }]}>
-                {hasShopLocation ? 'Update Shop Location' : 'Set Your Shop Location'}
-              </Text>
-              <Text style={[styles.locationSubtitle, { color: colors.text }]}>
-                {hasShopLocation 
-                  ? 'Update your shop location so customers can find you'
-                  : 'Help customers find your shop by setting your location'}
-              </Text>
-            </View>
-          </View>
-          <LocationButton
-            showText
-            style={[styles.locationButton, { backgroundColor: colors.tint, borderColor: colors.tint }]}
-            onLocationUpdate={handleLocationUpdate}
-          />
-        </View>
-      </View>
 
       {/* Today's Overview */}
       <View style={styles.overviewSection}>
@@ -241,15 +354,6 @@ export default function ShopDashboardScreen() {
         </Text>
         
         <View style={styles.actionsGrid}>
-          <TouchableOpacity
-            style={[styles.primaryAction, { backgroundColor: colors.tint }]}
-            onPress={handleQuickCreateBag}
-          >
-            <IconSymbol name="plus.circle.fill" size={28} color="white" />
-            <Text style={styles.primaryActionText}>Create New Bag</Text>
-            <Text style={styles.primaryActionSubtext}>Start selling today</Text>
-          </TouchableOpacity>
-
           <View style={styles.secondaryActions}>
             <TouchableOpacity
               style={[styles.secondaryAction, { backgroundColor: colors.cardBackground }]}
@@ -416,6 +520,18 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.9)',
     fontSize: 14,
   },
+  locationHeaderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+    marginBottom: 8,
+  },
+  locationHeaderText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 13,
+    flex: 1,
+  },
   profileButton: {
     width: 40,
     height: 40,
@@ -423,37 +539,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  locationSection: {
-    paddingHorizontal: 20,
-    marginBottom: 20,
-    marginTop: 20,
-  },
-  locationCard: {
-    padding: 20,
-    borderRadius: 16,
-    gap: 16,
-  },
-  locationContent: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  locationTextContainer: {
-    flex: 1,
-  },
-  locationTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  locationSubtitle: {
-    fontSize: 14,
-    opacity: 0.7,
-    lineHeight: 20,
-  },
-  locationButton: {
-    alignSelf: 'flex-start',
   },
   overviewSection: {
     paddingHorizontal: 20,
@@ -628,3 +713,4 @@ const styles = StyleSheet.create({
     marginTop: 100,
   },
 });
+

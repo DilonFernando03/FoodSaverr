@@ -35,6 +35,19 @@ export interface Customer extends BaseUser {
   favoriteShops: string[];
 }
 
+export interface ShopChain {
+  id: string;
+  chainName: string;
+  description?: string;
+  logoUrl?: string;
+  coverImageUrl?: string;
+  websiteUrl?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface Shop extends BaseUser {
   userType: UserType.SHOP;
   businessInfo: {
@@ -45,6 +58,9 @@ export interface Shop extends BaseUser {
     coverImage?: string;
     phoneNumber: string;
     website?: string;
+    locationName?: string; // e.g., "Downtown Location", "Mall Branch"
+    chainId?: string; // Optional reference to shop_chains table
+    chain?: ShopChain; // Optional chain information if part of a chain
   };
   location: {
     address: string;
@@ -104,5 +120,7 @@ export interface SignupCredentials {
     businessName: string;
     businessType: string;
     phoneNumber: string;
+    locationName?: string; // Optional: e.g., "Downtown Location", "Mall Branch"
+    chainId?: string; // Optional: if this shop belongs to an existing chain
   };
 }

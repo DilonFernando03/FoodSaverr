@@ -150,30 +150,57 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
     setError(null);
 
     try {
-      const currentLocation = await locationService.getCurrentLocation();
+      const locationResult = await locationService.getCurrentLocation();
+      const { permissionStatus, ...currentLocation } = locationResult;
+      
       setLocation(currentLocation);
-      setIsLocationEnabled(true);
+      
+      // Update location enabled status based on permission
+      setIsLocationEnabled(permissionStatus.canSave);
       
       // Save to AsyncStorage for persistence
       await saveLocationToStorage(currentLocation);
       
-      // Save to database if user is logged in
-      if (user) {
+      // Save to database only if permission allows saving ("Allow While Using App")
+      if (user && permissionStatus.canSave) {
         if (user.userType === UserType.CUSTOMER) {
           await saveCustomerLocation(currentLocation);
         } else if (user.userType === UserType.SHOP) {
           await saveShopLocation(currentLocation);
         }
+      } else if (user && permissionStatus.status === 'ephemeral') {
+        // "Allow Once" - don't save automatically, but user can manually save
+        console.log('Location access granted for this session only. Not saving automatically.');
       }
       
       return currentLocation;
     } catch (err: any) {
       const errorMessage = err.message || 'Failed to get location';
+      const isPermissionDenied = errorMessage.toLowerCase().includes('permission') || 
+                                  errorMessage.toLowerCase().includes('denied');
+      
       setError(errorMessage);
       setIsLocationEnabled(false);
       
-      // Only show alert if not silent (silent is used for automatic requests)
-      if (!silent) {
+      // Don't log console errors for permission denial - user made their choice
+      if (!isPermissionDenied) {
+        console.error('Location error:', err);
+      }
+      
+      // Show alert for permission denied even in silent mode (user explicitly requested location)
+      if (isPermissionDenied) {
+        Alert.alert(
+          'Location Access Denied',
+          'Location access is currently set to "Never". Please enable location access in Settings to use this feature.',
+          [
+            {
+              text: 'OK',
+              style: 'default',
+            },
+          ]
+        );
+      } else if (!silent) {
+        // Show alert for other errors only if not silent
         Alert.alert(
           'Location Error',
           errorMessage,
@@ -228,44 +255,65 @@ export const LocationProvider: React.FC<LocationProviderProps> = ({ children }) 
         if (isEnabled) {
           // Silently fetch location in background (won't show error alerts)
           try {
-            const currentLocation = await locationService.getCurrentLocation();
+            const locationResult = await locationService.getCurrentLocation();
+            const { permissionStatus, ...currentLocation } = locationResult;
+            
             setLocation(currentLocation);
+            setIsLocationEnabled(permissionStatus.canSave);
             
             // Save to AsyncStorage for persistence
             await saveLocationToStorage(currentLocation);
             
-            // Save to database
-            if (user.userType === UserType.CUSTOMER) {
-              await saveCustomerLocation(currentLocation);
-            } else if (user.userType === UserType.SHOP) {
-              await saveShopLocation(currentLocation);
+            // Save to database only if permission allows saving
+            if (permissionStatus.canSave) {
+              if (user.userType === UserType.CUSTOMER) {
+                await saveCustomerLocation(currentLocation);
+              } else if (user.userType === UserType.SHOP) {
+                await saveShopLocation(currentLocation);
+              }
             }
           } catch (err: any) {
-            console.error('Error fetching location on initialization:', err);
+            // Don't log console errors for permission denial
+            const errorMessage = err?.message || '';
+            const isPermissionDenied = errorMessage.toLowerCase().includes('permission') || 
+                                        errorMessage.toLowerCase().includes('denied');
+            if (!isPermissionDenied) {
+              console.error('Error fetching location on initialization:', err);
+            }
             // Keep the saved location if fresh fetch fails
           }
         } else {
           // If permission is not granted, try to request it (but only once)
           try {
-            const hasPermission = await locationService.requestLocationPermission();
-            if (hasPermission) {
-              setIsLocationEnabled(true);
+            const permissionResult = await locationService.requestLocationPermission();
+            if (permissionResult.status === 'granted' || permissionResult.status === 'ephemeral') {
+              setIsLocationEnabled(permissionResult.canSave);
               // Fetch location after permission is granted
               try {
-                const currentLocation = await locationService.getCurrentLocation();
+                const locationResult = await locationService.getCurrentLocation();
+                const { permissionStatus, ...currentLocation } = locationResult;
+                
                 setLocation(currentLocation);
                 
                 // Save to AsyncStorage for persistence
                 await saveLocationToStorage(currentLocation);
                 
-                // Save to database
-                if (user.userType === UserType.CUSTOMER) {
-                  await saveCustomerLocation(currentLocation);
-                } else if (user.userType === UserType.SHOP) {
-                  await saveShopLocation(currentLocation);
+                // Save to database only if permission allows saving
+                if (permissionStatus.canSave) {
+                  if (user.userType === UserType.CUSTOMER) {
+                    await saveCustomerLocation(currentLocation);
+                  } else if (user.userType === UserType.SHOP) {
+                    await saveShopLocation(currentLocation);
+                  }
                 }
               } catch (err: any) {
-                console.error('Error fetching location after permission grant:', err);
+                // Don't log console errors for permission denial
+                const errorMessage = err?.message || '';
+                const isPermissionDenied = errorMessage.toLowerCase().includes('permission') || 
+                                            errorMessage.toLowerCase().includes('denied');
+                if (!isPermissionDenied) {
+                  console.error('Error fetching location after permission grant:', err);
+                }
               }
             }
           } catch (error) {

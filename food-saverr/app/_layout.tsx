@@ -10,6 +10,7 @@ import { SurpriseBagProvider } from '@/contexts/SurpriseBagContext';
 import { LocationProvider } from '@/contexts/LocationContext';
 import { AuthProvider } from '@/contexts/AuthContext';
 import { ShopProvider } from '@/contexts/ShopContext';
+import { StripeProvider } from '@/contexts/StripeProvider';
 
 export default function RootLayout() {
   const colorScheme = useColorScheme();
@@ -23,27 +24,29 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <LocationProvider>
-        <SurpriseBagProvider>
-          <FoodProvider>
-            <ShopProvider>
-              <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-                <Stack>
-                  <Stack.Screen name="index" options={{ headerShown: false }} />
-                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                  <Stack.Screen name="(shop-tabs)" options={{ headerShown: false }} />
-                  <Stack.Screen name="auth" options={{ headerShown: false }} />
-                  <Stack.Screen name="bag/[bagId]" options={{ headerShown: false }} />
-                  <Stack.Screen name="payment/[bagId]" options={{ headerShown: false }} />
-                  <Stack.Screen name="+not-found" />
-                </Stack>
-                <StatusBar style="auto" />
-              </ThemeProvider>
-            </ShopProvider>
-          </FoodProvider>
-        </SurpriseBagProvider>
-      </LocationProvider>
-    </AuthProvider>
+    <StripeProvider>
+      <AuthProvider>
+        <LocationProvider>
+          <SurpriseBagProvider>
+            <FoodProvider>
+              <ShopProvider>
+                <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+                  <Stack>
+                    <Stack.Screen name="index" options={{ headerShown: false }} />
+                    <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                    <Stack.Screen name="(shop-tabs)" options={{ headerShown: false }} />
+                    <Stack.Screen name="auth" options={{ headerShown: false }} />
+                    <Stack.Screen name="bag/[bagId]" options={{ headerShown: false }} />
+                    <Stack.Screen name="payment/[bagId]" options={{ headerShown: false }} />
+                    <Stack.Screen name="+not-found" />
+                  </Stack>
+                  <StatusBar style="auto" />
+                </ThemeProvider>
+              </ShopProvider>
+            </FoodProvider>
+          </SurpriseBagProvider>
+        </LocationProvider>
+      </AuthProvider>
+    </StripeProvider>
   );
 }

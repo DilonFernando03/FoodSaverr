@@ -16,7 +16,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
 import { IconSymbol } from '@/components/ui/IconSymbol';
+import { LocationButton } from '@/components/LocationButton';
 import { Shop } from '@/types/User';
+import { supabase } from '@/lib/supabase';
 
 export default function ShopProfileScreen() {
   const { user, logout, updateUser } = useAuth();
@@ -25,6 +27,7 @@ export default function ShopProfileScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const [showEditModal, setShowEditModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
 
   const shop = user?.userType === 'shop' ? (user as Shop) : null;
@@ -51,6 +54,14 @@ export default function ShopProfileScreen() {
     },
   });
 
+  const [locationData, setLocationData] = useState({
+    address: shop?.location.address || '',
+    city: shop?.location.city || '',
+    postalCode: shop?.location.postalCode || '',
+    coordinates: shop?.location.coordinates || null,
+    permissionCanSave: true, // Track if permission allows saving
+  });
+
   useEffect(() => {
     if (!shop || showEditModal) {
       return;
@@ -67,6 +78,20 @@ export default function ShopProfileScreen() {
       postalCode: shop.location.postalCode || '',
     });
   }, [shop, showEditModal]);
+
+  useEffect(() => {
+    if (!shop || showLocationModal) {
+      return;
+    }
+
+    setLocationData({
+      address: shop.location.address || '',
+      city: shop.location.city || '',
+      postalCode: shop.location.postalCode || '',
+      coordinates: shop.location.coordinates || null,
+      permissionCanSave: true, // Reset when modal closes
+    });
+  }, [shop, showLocationModal]);
 
 
   const handleSaveProfile = async () => {
@@ -94,8 +119,10 @@ export default function ShopProfileScreen() {
       await updateUser(updatedShop);
       setShowEditModal(false);
       Alert.alert('Success', 'Profile updated successfully');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update profile');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to update profile';
+      Alert.alert('Error', errorMessage);
+      console.error('Error updating profile:', error);
     }
   };
 
@@ -121,8 +148,89 @@ export default function ShopProfileScreen() {
       await updateUser(updatedShop);
       setShowSettingsModal(false);
       Alert.alert('Success', 'Settings updated successfully');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to update settings');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to update settings';
+      Alert.alert('Error', errorMessage);
+      console.error('Error updating settings:', error);
+    }
+  };
+
+  const handleLocationUpdate = async (coords: { latitude: number; longitude: number; city?: string; permissionStatus?: any }) => {
+    if (!coords || !shop) return;
+    
+    const permissionResult = coords.permissionStatus;
+    const shouldSave = permissionResult?.canSave !== false; // Default to true if not provided
+    
+    setLocationData({
+      ...locationData,
+      coordinates: {
+        lat: coords.latitude,
+        lng: coords.longitude,
+      },
+      city: coords.city || locationData.city,
+      permissionCanSave: shouldSave, // Track if we can save
+    });
+  };
+
+  const handleSaveLocation = async () => {
+    if (!shop) return;
+
+    // Validate required fields
+    if (!locationData.address.trim() || !locationData.city.trim()) {
+      Alert.alert('Error', 'Please fill in address and city');
+      return;
+    }
+
+    if (!locationData.coordinates) {
+      Alert.alert('Error', 'Please get your location using the location button');
+      return;
+    }
+
+    // Save location regardless of permission status (user can manually save even with "Allow Once")
+    await saveLocationToDatabase();
+  };
+
+  const saveLocationToDatabase = async () => {
+    if (!shop || !locationData.coordinates) return;
+
+    try {
+      // Update shop profile with coordinates using PostGIS format
+      const { error: updateError } = await supabase
+        .from('shop_profiles')
+        .update({
+          address: locationData.address.trim(),
+          city: locationData.city.trim(),
+          postal_code: locationData.postalCode.trim() || null,
+          coordinates: `SRID=4326;POINT(${locationData.coordinates.lng} ${locationData.coordinates.lat})`,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', shop.id);
+
+      if (updateError) {
+        console.error('Error updating location:', updateError);
+        Alert.alert('Error', 'Failed to update location. Please try again.');
+        return;
+      }
+
+      // Update local user state
+      const updatedShop: Shop = {
+        ...shop,
+        location: {
+          ...shop.location,
+          address: locationData.address.trim(),
+          city: locationData.city.trim(),
+          postalCode: locationData.postalCode.trim() || '',
+          coordinates: locationData.coordinates,
+        },
+      };
+
+      await updateUser(updatedShop);
+      setShowLocationModal(false);
+      Alert.alert('Success', 'Location updated successfully');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to update location';
+      Alert.alert('Error', errorMessage);
+      console.error('Error updating location:', error);
     }
   };
 
@@ -259,6 +367,14 @@ export default function ShopProfileScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.text }]}>Quick Actions</Text>
         <View style={styles.actionsContainer}>
+          <TouchableOpacity
+            style={[styles.actionCard, { backgroundColor: colors.card }]}
+            onPress={() => setShowLocationModal(true)}
+          >
+            <IconSymbol name="location.fill" size={24} color={colors.tint} />
+            <Text style={[styles.actionText, { color: colors.text }]}>Update Location</Text>
+          </TouchableOpacity>
+          
           <TouchableOpacity
             style={[styles.actionCard, { backgroundColor: colors.card }]}
             onPress={() => setShowSettingsModal(true)}
@@ -529,6 +645,93 @@ export default function ShopProfileScreen() {
           </ScrollView>
         </View>
       </Modal>
+
+      {/* Update Location Modal */}
+      <Modal
+        visible={showLocationModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+          <View style={styles.modalHeader}>
+            <TouchableOpacity onPress={() => setShowLocationModal(false)}>
+              <Text style={[styles.modalCancelText, { color: colors.tint }]}>Cancel</Text>
+            </TouchableOpacity>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Update Location</Text>
+            <TouchableOpacity onPress={handleSaveLocation}>
+              <Text style={[styles.modalSaveText, { color: colors.tint }]}>Save</Text>
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView style={styles.modalContent}>
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>
+                Get Current Location
+              </Text>
+              <Text style={[styles.inputDescription, { color: colors.text }]}>
+                Use your device's GPS to automatically set your location
+              </Text>
+              <LocationButton
+                onLocationUpdate={handleLocationUpdate}
+                style={{ marginTop: 8 }}
+              />
+              {locationData.coordinates && (
+                <View style={[styles.locationInfo, { backgroundColor: colors.card }]}>
+                  <IconSymbol 
+                    name="checkmark.circle.fill" 
+                    size={20} 
+                    color="#4CAF50" 
+                  />
+                  <Text style={[styles.locationInfoText, { color: colors.text }]}>
+                    Location captured: {locationData.coordinates.lat.toFixed(6)}, {locationData.coordinates.lng.toFixed(6)}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={[styles.inputLabel, { color: colors.text }]}>Address *</Text>
+              <TextInput
+                style={[styles.input, { backgroundColor: colors.card, color: colors.text }]}
+                value={locationData.address}
+                onChangeText={(text) => setLocationData({ ...locationData, address: text })}
+                placeholder="Enter business address"
+                placeholderTextColor={colors.tabIconDefault}
+              />
+            </View>
+
+            <View style={styles.inputRow}>
+              <View style={[styles.inputGroup, { flex: 1, marginRight: 8 }]}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>City *</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.card, color: colors.text }]}
+                  value={locationData.city}
+                  onChangeText={(text) => setLocationData({ ...locationData, city: text })}
+                  placeholder="City"
+                  placeholderTextColor={colors.tabIconDefault}
+                />
+              </View>
+              <View style={[styles.inputGroup, { flex: 1, marginLeft: 8 }]}>
+                <Text style={[styles.inputLabel, { color: colors.text }]}>Postal Code</Text>
+                <TextInput
+                  style={[styles.input, { backgroundColor: colors.card, color: colors.text }]}
+                  value={locationData.postalCode}
+                  onChangeText={(text) => setLocationData({ ...locationData, postalCode: text })}
+                  placeholder="Postal Code"
+                  placeholderTextColor={colors.tabIconDefault}
+                />
+              </View>
+            </View>
+
+            <View style={[styles.infoBox, { backgroundColor: colors.card }]}>
+              <IconSymbol name="info.circle" size={20} color={colors.tint} />
+              <Text style={[styles.infoBoxText, { color: colors.text }]}>
+                Updating your location helps customers find your shop more easily. Make sure to get your GPS location for accurate positioning.
+              </Text>
+            </View>
+          </ScrollView>
+        </View>
+      </Modal>
       </ScrollView>
     </SafeAreaView>
   );
@@ -759,5 +962,39 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     marginTop: 100,
+  },
+  inputDescription: {
+    fontSize: 14,
+    opacity: 0.7,
+    marginBottom: 8,
+  },
+  locationInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 12,
+    gap: 8,
+  },
+  locationInfoText: {
+    fontSize: 14,
+    flex: 1,
+  },
+  locationWarningText: {
+    fontSize: 12,
+    marginTop: 4,
+    opacity: 0.7,
+  },
+  infoBox: {
+    flexDirection: 'row',
+    padding: 16,
+    borderRadius: 8,
+    marginTop: 20,
+    gap: 12,
+  },
+  infoBoxText: {
+    fontSize: 14,
+    flex: 1,
+    lineHeight: 20,
   },
 });

@@ -614,11 +614,20 @@ export async function placeBagOrder(orderData: {
   quantity: number
   total_price: number
   notes?: string
+  stripe_payment_intent_id?: string
+  stripe_charge_id?: string
+  payment_status?: string
+  platform_fee?: number
+  shop_amount?: number
+  payment_method?: string
 }) {
   try {
     const { data, error } = await supabase
       .from('bag_orders')
-      .insert(orderData)
+      .insert({
+        ...orderData,
+        order_status: orderData.payment_status === 'succeeded' ? 'confirmed' : 'pending',
+      })
       .select()
       .single()
 

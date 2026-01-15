@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase, signInUser, signUpUser, signOutUser, getCurrentUser } from '@/lib/supabase';
 import { AuthState, LoginCredentials, SignupCredentials, UserType, Customer, Shop } from '@/types/User';
 import { validatePassword } from '@/lib/passwordPolicy';
+import { parsePostGISCoordinates } from '@/lib/coordinateParser';
 
 interface AuthContextType extends AuthState {
   login: (credentials: LoginCredentials) => Promise<void>;
@@ -158,6 +159,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           }
         }
 
+        console.log('Loading shop profile - city from database:', updatedProfile?.city);
+        console.log('Loading shop profile - full profile data:', {
+          city: updatedProfile?.city,
+          address: updatedProfile?.address,
+          postal_code: updatedProfile?.postal_code,
+        });
+
         user = {
           id: userData.id,
           email: userData.email,
@@ -171,30 +179,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             businessType: updatedProfile?.business_type || '',
             description: updatedProfile?.description || '',
             phoneNumber: userData.phone_number || '',
+            website: updatedProfile?.website_url || undefined,
           },
           location: {
             address: updatedProfile?.address || '',
             city: updatedProfile?.city || '',
             postalCode: updatedProfile?.postal_code || '',
             coordinates: updatedProfile?.coordinates ? (() => {
-              // Parse coordinates from PostGIS geography point
-              const coords = updatedProfile.coordinates as any;
-              if (typeof coords === 'string') {
-                const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
-                if (match) {
-                  return { lat: parseFloat(match[2]), lng: parseFloat(match[1]) };
-                }
-              } else if (coords && typeof coords === 'object') {
-                const lat = coords.lat ?? coords.latitude ?? coords.y;
-                const lng = coords.lng ?? coords.longitude ?? coords.x;
-                if (lat != null && lng != null) {
-                  return { lat, lng };
-                }
-                if (coords.coordinates && Array.isArray(coords.coordinates) && coords.coordinates.length >= 2) {
-                  return { lat: coords.coordinates[1], lng: coords.coordinates[0] };
-                }
-              }
-              return null;
+              // Parse coordinates from PostGIS geography point using utility function
+              const parsed = parsePostGISCoordinates(updatedProfile.coordinates);
+              return parsed ? { lat: parsed.lat, lng: parsed.lng } : null;
             })() : null,
           },
           operatingHours: updatedProfile?.operating_hours || {},
@@ -257,7 +251,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { user: authUser, error: authError } = await signInUser(credentials.email, credentials.password);
 
       if (authError || !authUser) {
-        throw new Error(authError?.message || 'Login failed. Please check your credentials.');
+        // Replace "email not confirmed" with "email not verified"
+        let errorMessage = authError?.message || 'Login failed. Please check your credentials.';
+        const lowerMessage = errorMessage.toLowerCase();
+        
+        // Check for email confirmation error messages and replace with "email not verified"
+        if (lowerMessage.includes('email not confirmed') || 
+            lowerMessage.includes('email_not_confirmed') ||
+            lowerMessage.includes('email is not confirmed') ||
+            lowerMessage.includes('email needs to be confirmed')) {
+          errorMessage = 'Email not verified. Please verify your email before signing in.';
+        }
+        throw new Error(errorMessage);
       }
 
       // Get full user profile
@@ -292,30 +297,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             businessType: profile?.business_type || '',
             description: profile?.description || '',
             phoneNumber: userData.phone_number || '',
+            website: (profile as any)?.website_url || undefined,
           },
           location: {
             address: profile?.address || '',
             city: profile?.city || '',
             postalCode: profile?.postal_code || '',
             coordinates: profile?.coordinates ? (() => {
-              // Parse coordinates from PostGIS geography point
-              const coords = profile.coordinates as any;
-              if (typeof coords === 'string') {
-                const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
-                if (match) {
-                  return { lat: parseFloat(match[2]), lng: parseFloat(match[1]) };
-                }
-              } else if (coords && typeof coords === 'object') {
-                const lat = coords.lat ?? coords.latitude ?? coords.y;
-                const lng = coords.lng ?? coords.longitude ?? coords.x;
-                if (lat != null && lng != null) {
-                  return { lat, lng };
-                }
-                if (coords.coordinates && Array.isArray(coords.coordinates) && coords.coordinates.length >= 2) {
-                  return { lat: coords.coordinates[1], lng: coords.coordinates[0] };
-                }
-              }
-              return null;
+              // Parse coordinates from PostGIS geography point using utility function
+              const parsed = parsePostGISCoordinates(profile.coordinates);
+              return parsed ? { lat: parsed.lat, lng: parsed.lng } : null;
             })() : null,
           },
           operatingHours: profile?.operating_hours || {},
@@ -509,30 +500,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             businessType: profile?.business_type || '',
             description: profile?.description || '',
             phoneNumber: userData.phone_number || '',
+            website: (profile as any)?.website_url || undefined,
           },
           location: {
             address: profile?.address || '',
             city: profile?.city || '',
             postalCode: profile?.postal_code || '',
             coordinates: profile?.coordinates ? (() => {
-              // Parse coordinates from PostGIS geography point
-              const coords = profile.coordinates as any;
-              if (typeof coords === 'string') {
-                const match = coords.match(/POINT\(([^ ]+) ([^ ]+)\)/);
-                if (match) {
-                  return { lat: parseFloat(match[2]), lng: parseFloat(match[1]) };
-                }
-              } else if (coords && typeof coords === 'object') {
-                const lat = coords.lat ?? coords.latitude ?? coords.y;
-                const lng = coords.lng ?? coords.longitude ?? coords.x;
-                if (lat != null && lng != null) {
-                  return { lat, lng };
-                }
-                if (coords.coordinates && Array.isArray(coords.coordinates) && coords.coordinates.length >= 2) {
-                  return { lat: coords.coordinates[1], lng: coords.coordinates[0] };
-                }
-              }
-              return null;
+              // Parse coordinates from PostGIS geography point using utility function
+              const parsed = parsePostGISCoordinates(profile.coordinates);
+              return parsed ? { lat: parsed.lat, lng: parsed.lng } : null;
             })() : null,
           },
           operatingHours: {},
@@ -628,10 +605,147 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateUser = async (user: Customer | Shop) => {
     try {
-      await AsyncStorage.setItem('user', JSON.stringify(user));
-      dispatch({ type: 'SET_USER', payload: user });
-    } catch (error) {
-      dispatch({ type: 'SET_ERROR', payload: 'Failed to update profile.' });
+      // Update Supabase database first
+      if (user.userType === UserType.SHOP) {
+        const shop = user as Shop;
+        
+        // Update users table (phone_number)
+        const { error: userError } = await supabase
+          .from('users')
+          .update({
+            phone_number: shop.businessInfo.phoneNumber || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+
+        if (userError) {
+          console.error('Error updating user record:', userError);
+          throw new Error('Failed to update user record in database.');
+        }
+
+        // Validate required fields
+        // Allow coordinate-only updates (when coordinates exist but address is empty)
+        // This happens when updating location via LocationButton
+        const isCoordinateOnlyUpdate = shop.location.coordinates !== null && 
+          (!shop.location.address || shop.location.address.trim() === '');
+        
+        if (isCoordinateOnlyUpdate) {
+          // For coordinate-only updates, only validate city (address can be empty)
+          if (!shop.location.city || shop.location.city.trim() === '') {
+            throw new Error('City is required and cannot be empty.');
+          }
+        } else {
+          // For full profile updates, validate both address and city
+          if (!shop.location.city || shop.location.city.trim() === '') {
+            throw new Error('City is required and cannot be empty.');
+          }
+          if (!shop.location.address || shop.location.address.trim() === '') {
+            throw new Error('Address is required and cannot be empty.');
+          }
+        }
+
+        // Update shop_profiles table
+        const shopProfileUpdate: any = {
+          business_name: shop.businessInfo.businessName,
+          business_type: shop.businessInfo.businessType,
+          description: shop.businessInfo.description || null,
+          website_url: shop.businessInfo.website || null,
+          city: shop.location.city.trim(),
+          postal_code: shop.location.postalCode?.trim() || null,
+          auto_post_bags: shop.settings.autoPostBags,
+          default_bag_quantity: shop.settings.defaultBagQuantity,
+          default_discount_percentage: shop.settings.defaultDiscountPercentage,
+          notifications_new_orders: shop.settings.notificationSettings.newOrders,
+          notifications_low_stock: shop.settings.notificationSettings.lowStock,
+          notifications_reviews: shop.settings.notificationSettings.reviews,
+          updated_at: new Date().toISOString(),
+        };
+
+        // Only update address if it's provided (for coordinate-only updates, preserve existing address)
+        if (shop.location.address && shop.location.address.trim() !== '') {
+          shopProfileUpdate.address = shop.location.address.trim();
+        }
+        // Note: If address is empty, we don't include it in the update to preserve the existing value in DB
+
+        console.log('Updating shop profile with data:', {
+          id: user.id,
+          city: shopProfileUpdate.city,
+          address: shopProfileUpdate.address,
+        });
+
+        const { error: shopError, data: updatedData } = await supabase
+          .from('shop_profiles')
+          .update(shopProfileUpdate)
+          .eq('id', user.id)
+          .select();
+
+        if (shopError) {
+          console.error('Error updating shop profile:', shopError);
+          console.error('Update data that failed:', shopProfileUpdate);
+          throw new Error(`Failed to update shop profile: ${shopError.message}`);
+        }
+
+        console.log('Shop profile updated successfully:', updatedData);
+        
+        // Verify the city was saved correctly
+        if (updatedData && updatedData.length > 0) {
+          console.log('Verification - City in updated record:', updatedData[0].city);
+          if (updatedData[0].city !== shopProfileUpdate.city) {
+            console.warn('WARNING: City mismatch! Expected:', shopProfileUpdate.city, 'Got:', updatedData[0].city);
+          }
+        }
+      } else {
+        // Update customer profile
+        const customer = user as Customer;
+        
+        // Update users table (phone_number)
+        const { error: userError } = await supabase
+          .from('users')
+          .update({
+            phone_number: customer.phoneNumber || null,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', user.id);
+
+        if (userError) {
+          console.error('Error updating user record:', userError);
+          throw new Error('Failed to update user record in database.');
+        }
+
+        // Update customer_profiles table if address exists
+        if (customer.address) {
+          const customerProfileUpdate: any = {
+            address_street: customer.address.street || null,
+            address_city: customer.address.city || null,
+            address_postal_code: customer.address.postalCode || null,
+            updated_at: new Date().toISOString(),
+          };
+
+          // Note: Coordinates are not updated here as they require PostGIS functions
+          // If coordinate updates are needed, they should be handled separately
+
+          const { error: customerError } = await supabase
+            .from('customer_profiles')
+            .update(customerProfileUpdate)
+            .eq('id', user.id);
+
+          if (customerError) {
+            console.error('Error updating customer profile:', customerError);
+            throw new Error('Failed to update customer profile in database.');
+          }
+        }
+      }
+
+      // Small delay to ensure database transaction is committed
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Refresh user data from database to ensure consistency
+      await checkAuthStatus();
+    } catch (error: any) {
+      console.error('Error updating user:', error);
+      const errorMessage = error?.message || 'Failed to update profile.';
+      dispatch({ type: 'SET_ERROR', payload: errorMessage });
+      throw error;
     }
   };
 

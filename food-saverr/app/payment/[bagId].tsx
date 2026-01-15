@@ -1,22 +1,37 @@
-import React, { useMemo, useState } from 'react';
-import { StyleSheet, View, TouchableOpacity } from 'react-native';
+import React, { useMemo, useState, useEffect } from 'react';
+import { StyleSheet, View, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useSurpriseBag } from '@/contexts/SurpriseBagContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Colors } from '@/constants/Colors';
+import { createPaymentIntent, confirmPayment } from '@/services/PaymentService';
+import { placeBagOrder } from '@/lib/supabase';
+import { useStripeContext } from '@/contexts/StripeProvider';
+
+// Don't import Stripe at module level - it requires native modules
+// We'll handle payment differently if Stripe isn't available
 
 export default function PaymentScreen() {
   const { bagId } = useLocalSearchParams<{ bagId?: string }>();
   const { state } = useSurpriseBag();
+  const { user } = useAuth();
   const router = useRouter();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { isInitialized, isAvailable, error: stripeError } = useStripeContext();
+  
+  // Note: We can't use Stripe hooks here because they require native modules
+  // Instead, we'll handle payment through the backend API directly
+  
   const bag = state.bags.find((b) => b.id === bagId);
   const [quantity, setQuantity] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
   const totalPrice = useMemo(() => {
     if (!bag) return 0;
@@ -46,6 +61,227 @@ export default function PaymentScreen() {
       if (next > bag.itemsLeft) return bag.itemsLeft;
       return next;
     });
+  };
+
+  const handlePayment = async () => {
+    if (!bag || !user || user.userType !== 'customer') {
+      Alert.alert('Error', 'Please log in as a customer to make a purchase');
+      return;
+    }
+
+    if (quantity > bag.itemsLeft) {
+      Alert.alert('Error', 'Not enough bags available');
+      return;
+    }
+
+    // Check if Stripe is available
+    if (!isAvailable || !isInitialized) {
+      Alert.alert(
+        'Payment Unavailable',
+        stripeError || 'Stripe payment is not available. This feature requires a development build. Please build the app using EAS Build or Expo Development Build.',
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              // For now, allow creating order without payment (for testing)
+              // In production, you should require payment
+              Alert.alert(
+                'Development Mode',
+                'Creating order without payment (development only). In production, payment is required.',
+                [
+                  {
+                    text: 'Continue',
+                    onPress: async () => {
+                      try {
+                        const totalAmount = bag.discountedPrice * quantity;
+                        const orderResult = await placeBagOrder({
+                          bag_id: bag.id,
+                          customer_id: user.id,
+                          quantity,
+                          total_price: totalAmount,
+                          payment_status: 'pending',
+                        });
+
+                        if (orderResult.error) {
+                          Alert.alert('Error', 'Failed to create order');
+                          return;
+                        }
+
+                        Alert.alert('Order Created', 'Order created successfully (payment pending)');
+                        router.replace('/(tabs)/orders');
+                      } catch (error: any) {
+                        Alert.alert('Error', error.message);
+                      }
+                    },
+                  },
+                  { text: 'Cancel', style: 'cancel' },
+                ]
+              );
+            },
+          },
+        ]
+      );
+      return;
+    }
+
+    // For now, since Stripe React Native requires native modules not available in Expo Go,
+    // we'll create the order and show a message that payment will be processed
+    // In production with a development build, you can use the full Stripe flow
+    
+    if (!isAvailable) {
+      // Fallback: Create order without payment (for development/testing)
+      Alert.alert(
+        'Development Mode',
+        'Stripe payment requires a development build. Creating order without payment (for testing only).',
+        [
+          {
+            text: 'Continue',
+            onPress: async () => {
+              try {
+                setLoading(true);
+                const totalAmount = bag.discountedPrice * quantity;
+                const orderResult = await placeBagOrder({
+                  bag_id: bag.id,
+                  customer_id: user.id,
+                  quantity,
+                  total_price: totalAmount,
+                  payment_status: 'pending',
+                });
+
+                if (orderResult.error) {
+                  Alert.alert('Error', 'Failed to create order');
+                  setLoading(false);
+                  return;
+                }
+
+                Alert.alert('Order Created', 'Order created successfully. Payment will be processed separately.');
+                router.replace('/(tabs)/orders');
+              } catch (error: any) {
+                Alert.alert('Error', error.message);
+              } finally {
+                setLoading(false);
+              }
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+      return;
+    }
+
+    // Full Stripe payment flow (requires development build)
+    setLoading(true);
+    try {
+      // Step 1: Create payment intent on backend
+      const totalAmount = bag.discountedPrice * quantity;
+      const paymentIntentResult = await createPaymentIntent({
+        amount: totalAmount,
+        currency: 'usd', // Change to your currency (e.g., 'lkr' for Sri Lankan Rupees)
+        bagId: bag.id,
+        shopId: bag.restaurantId,
+        customerId: user.id,
+        quantity,
+      });
+
+      if (paymentIntentResult.error || !paymentIntentResult.data) {
+        Alert.alert('Payment Error', paymentIntentResult.error || 'Failed to initialize payment');
+        setLoading(false);
+        return;
+      }
+
+      const { clientSecret, paymentIntentId, platformFee, shopAmount } = paymentIntentResult.data;
+
+      // Step 2 & 3: For now, we'll need to implement Stripe payment sheet
+      // This requires native modules, so we'll show a message
+      Alert.alert(
+        'Payment Processing',
+        'Full Stripe payment integration requires a development build with native modules. For now, creating order with pending payment status.',
+        [
+          {
+            text: 'Create Order',
+            onPress: async () => {
+              const orderResult = await placeBagOrder({
+                bag_id: bag.id,
+                customer_id: user.id,
+                quantity,
+                total_price: totalAmount,
+                stripe_payment_intent_id: paymentIntentId,
+                payment_status: 'pending',
+                platform_fee: platformFee / 100,
+                shop_amount: shopAmount / 100,
+                payment_method: 'card',
+              });
+
+              if (orderResult.error) {
+                Alert.alert('Error', 'Failed to create order');
+                return;
+              }
+
+              Alert.alert('Order Created', 'Order created. Payment will be processed.');
+              router.replace('/(tabs)/orders');
+            },
+          },
+          { text: 'Cancel', style: 'cancel' },
+        ]
+      );
+
+      if (presentError) {
+        if (presentError.code !== 'Canceled') {
+          Alert.alert('Payment Error', presentError.message);
+        }
+        setProcessing(false);
+        return;
+      }
+
+      // Step 4: Payment succeeded - create order in database
+      const orderResult = await placeBagOrder({
+        bag_id: bag.id,
+        customer_id: user.id,
+        quantity,
+        total_price: totalAmount,
+        stripe_payment_intent_id: paymentIntentId,
+        payment_status: 'succeeded',
+        platform_fee: platformFee / 100, // Convert from cents
+        shop_amount: shopAmount / 100, // Convert from cents
+        payment_method: 'card',
+      });
+
+      if (orderResult.error) {
+        Alert.alert('Error', 'Payment succeeded but failed to create order. Please contact support.');
+        console.error('Order creation error:', orderResult.error);
+        setProcessing(false);
+        return;
+      }
+
+      // Step 5: Confirm payment on backend
+      await confirmPayment({
+        paymentIntentId,
+        bagId: bag.id,
+        shopId: bag.restaurantId,
+        customerId: user.id,
+        quantity,
+      });
+
+      // Success!
+      Alert.alert(
+        'Payment Successful!',
+        `Your order for ${quantity} ${bag.title} has been confirmed.`,
+        [
+          {
+            text: 'OK',
+            onPress: () => {
+              router.replace('/(tabs)/orders');
+            },
+          },
+        ]
+      );
+    } catch (error: any) {
+      console.error('Payment error:', error);
+      Alert.alert('Payment Error', error.message || 'An unexpected error occurred');
+    } finally {
+      setLoading(false);
+      setProcessing(false);
+    }
   };
 
   return (
@@ -105,8 +341,10 @@ export default function PaymentScreen() {
             </ThemedText>
           </View>
           <View style={styles.breakdownRow}>
-            <ThemedText style={[styles.breakdownLabel, { color: colors.onSurface }]}>Service fee</ThemedText>
-            <ThemedText style={[styles.breakdownValue, { color: colors.text }]}>Rs. 0.00</ThemedText>
+            <ThemedText style={[styles.breakdownLabel, { color: colors.onSurface }]}>Platform fee (30%)</ThemedText>
+            <ThemedText style={[styles.breakdownValue, { color: colors.text }]}>
+              Rs. {(totalPrice * 0.30).toFixed(2)}
+            </ThemedText>
           </View>
           <View style={styles.breakdownRow}>
             <ThemedText style={[styles.breakdownLabel, { color: colors.onSurface }]}>Discount</ThemedText>
@@ -123,10 +361,19 @@ export default function PaymentScreen() {
           <ThemedText style={[styles.ctaPrice, { color: colors.text }]}>Rs. {totalPrice.toFixed(2)}</ThemedText>
         </View>
         <TouchableOpacity
-          style={[styles.payButton, { backgroundColor: colors.primary }]}
-          onPress={() => router.push('/delivery')}
+          style={[
+            styles.payButton,
+            { backgroundColor: colors.primary },
+            (loading || processing) && styles.payButtonDisabled,
+          ]}
+          onPress={handlePayment}
+          disabled={loading || processing}
         >
-          <ThemedText style={styles.payButtonText}>Continue to Payment</ThemedText>
+          {loading || processing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <ThemedText style={styles.payButtonText}>Pay Now</ThemedText>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -245,6 +492,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 16,
   },
+  payButtonDisabled: {
+    opacity: 0.6,
+  },
   emptyState: {
     flex: 1,
     justifyContent: 'center',
@@ -269,6 +519,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
+
+
+
+
+
+
 
 
 

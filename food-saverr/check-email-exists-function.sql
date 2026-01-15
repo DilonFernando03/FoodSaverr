@@ -45,3 +45,11 @@ GRANT EXECUTE ON FUNCTION check_email_exists(TEXT) TO anon;
 
 
 
+
+
+
+
+
+
+
+

@@ -4,6 +4,7 @@ import { BagCategory } from '@/types/SurpriseBag';
 import { createSurpriseBag, supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { isBagExpired, isBagCancelled } from '@/lib/bagUtils';
+import LocationService from '@/services/LocationService';
 
 interface ShopState {
   bags: ShopBag[];
@@ -234,6 +235,28 @@ export function ShopProvider({ children }: { children: ReactNode }) {
 
       if (!user || user.userType !== 'shop') {
         throw new Error('Shop user required');
+      }
+
+      // Check if shop has location set (coordinates, address, or city)
+      const hasCoordinates = user.location?.coordinates && 
+        user.location.coordinates.lat !== null && 
+        user.location.coordinates.lng !== null &&
+        (user.location.coordinates.lat !== 0 || user.location.coordinates.lng !== 0);
+      
+      const hasAddress = user.location?.address && user.location.address.trim() !== '';
+      const hasCity = user.location?.city && user.location.city.trim() !== '';
+      const hasLocation = hasCoordinates || hasAddress || hasCity;
+      
+      if (!hasLocation) {
+        // Check location permission status
+        const locationService = LocationService.getInstance();
+        const permissionResult = await locationService.checkLocationPermission();
+        
+        if (permissionResult.status === 'denied' || !permissionResult.canSave) {
+          throw new Error('Location access is required to create bags. Please enable location access in Settings and set your shop location in Profile.');
+        } else {
+          throw new Error('Shop location is required to create bags. Please set your location in Profile > Update Location.');
+        }
       }
 
       // Convert category enum to database format

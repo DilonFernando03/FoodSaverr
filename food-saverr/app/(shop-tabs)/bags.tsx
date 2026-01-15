@@ -150,8 +150,9 @@ export default function ShopBagsScreen() {
 
       closeModal();
       Alert.alert('Success', 'Bag created successfully!');
-    } catch (error) {
-      Alert.alert('Error', 'Failed to create bag');
+    } catch (error: any) {
+      const errorMessage = error?.message || 'Failed to create bag';
+      Alert.alert('Error', errorMessage);
     }
   };
 

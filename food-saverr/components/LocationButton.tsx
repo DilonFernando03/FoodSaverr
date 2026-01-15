@@ -1,12 +1,13 @@
 import React from 'react';
-import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, View } from 'react-native';
+import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, View, Alert, Platform } from 'react-native';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import { useLocationContext } from '@/contexts/LocationContext';
+import LocationService, { LocationPermissionResult } from '@/services/LocationService';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 
 interface LocationButtonProps {
-  onLocationUpdate?: (location: { latitude: number; longitude: number; city?: string; country?: string }) => void;
+  onLocationUpdate?: (location: { latitude: number; longitude: number; city?: string; country?: string; permissionStatus?: any }) => void;
   style?: any;
   textStyle?: any;
   showText?: boolean;
@@ -24,17 +25,66 @@ export const LocationButton: React.FC<LocationButtonProps> = ({
 
   const handlePress = async () => {
     try {
-      const newLocation = await getCurrentLocation();
-      if (newLocation && onLocationUpdate) {
+      const locationService = LocationService.getInstance();
+      
+      // Check permission status first
+      const permissionResult = await locationService.checkLocationPermission();
+      
+      // If permission is denied, show alert and return early
+      if (permissionResult.status === 'denied') {
+        Alert.alert(
+          'Location Access Denied',
+          'Location access is currently set to "Never". Please enable location access in Settings to use this feature.',
+          [
+            {
+              text: 'OK',
+              style: 'default',
+            },
+          ]
+        );
+        return;
+      }
+      
+      // Get location with permission status
+      const locationResult = await locationService.getCurrentLocation();
+      
+      if (locationResult && onLocationUpdate) {
+        const resultPermissionStatus = locationResult.permissionStatus;
+        
         onLocationUpdate({
-          latitude: newLocation.latitude,
-          longitude: newLocation.longitude,
-          city: newLocation.city,
-          country: newLocation.country,
+          latitude: locationResult.latitude,
+          longitude: locationResult.longitude,
+          city: locationResult.city,
+          country: locationResult.country,
+          permissionStatus: resultPermissionStatus,
         });
       }
-    } catch (error) {
-      console.error('Location button error:', error);
+    } catch (error: any) {
+      const errorMessage = error.message || 'Failed to get location. Please try again.';
+      const isPermissionDenied = errorMessage.toLowerCase().includes('permission') || 
+                                  errorMessage.toLowerCase().includes('denied');
+      
+      // Don't log console errors for permission denial - user made their choice
+      if (!isPermissionDenied) {
+        console.error('Location button error:', error);
+        Alert.alert(
+          'Location Error',
+          errorMessage,
+          [{ text: 'OK' }]
+        );
+      } else {
+        // Show alert for permission denied - user needs to change settings
+        Alert.alert(
+          'Location Access Denied',
+          'Location access is currently set to "Never". Please enable location access in Settings to use this feature.',
+          [
+            {
+              text: 'OK',
+              style: 'default',
+            },
+          ]
+        );
+      }
     }
   };
 

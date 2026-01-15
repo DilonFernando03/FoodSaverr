@@ -17,6 +17,13 @@ export interface LocationError {
   message: string;
 }
 
+export type LocationPermissionStatus = 'granted' | 'denied' | 'undetermined' | 'ephemeral';
+
+export interface LocationPermissionResult {
+  status: LocationPermissionStatus;
+  canSave: boolean; // true if "Allow While Using App", false for "Allow Once" or "Don't Allow"
+}
+
 class LocationService {
   private static instance: LocationService;
 
@@ -30,33 +37,99 @@ class LocationService {
   }
 
   /**
-   * Request location permissions
+   * Check current location permission status
+   * Returns detailed permission information including iOS-specific states
    */
-  public async requestLocationPermission(): Promise<boolean> {
+  public async checkLocationPermission(): Promise<LocationPermissionResult> {
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      return status === 'granted';
+      const { status, canAskAgain } = await Location.getForegroundPermissionsAsync();
+      
+      // On iOS, check if permission is ephemeral (Allow Once)
+      // When user selects "Allow Once":
+      // - status is "granted"
+      // - canAskAgain is true (they can be asked again next time)
+      // When user selects "Allow While Using App":
+      // - status is "granted"
+      // - canAskAgain is false (permission is permanent)
+      if (Platform.OS === 'ios') {
+        if (status === 'granted' && canAskAgain) {
+          // This is likely "Allow Once" - temporary permission
+          // Note: This is not 100% reliable, but it's the best we can do
+          // The system doesn't provide a direct way to distinguish them
+          return {
+            status: 'ephemeral',
+            canSave: false, // Don't save for "Allow Once"
+          };
+        }
+      }
+
+      return {
+        status: status as LocationPermissionStatus,
+        canSave: status === 'granted' && (Platform.OS !== 'ios' || !canAskAgain), // Only save if fully granted
+      };
+    } catch (err) {
+      console.warn('Location permission check error:', err);
+      return {
+        status: 'undetermined',
+        canSave: false,
+      };
+    }
+  }
+
+  /**
+   * Request location permissions
+   * On iOS, this will show the system dialog with three options:
+   * - "Allow Once" (ephemeral) - canAskAgain = true
+   * - "Allow While Using App" (granted) - canAskAgain = false
+   * - "Don't Allow" (denied)
+   */
+  public async requestLocationPermission(): Promise<LocationPermissionResult> {
+    try {
+      const { status, canAskAgain } = await Location.requestForegroundPermissionsAsync();
+      
+      // On iOS, check if permission is ephemeral (Allow Once)
+      // When user selects "Allow Once", canAskAgain is true
+      // When user selects "Allow While Using App", canAskAgain is false
+      if (Platform.OS === 'ios') {
+        if (status === 'granted' && canAskAgain) {
+          // This is "Allow Once" - temporary permission
+          return {
+            status: 'ephemeral',
+            canSave: false, // Don't save for "Allow Once"
+          };
+        }
+      }
+
+      return {
+        status: status as LocationPermissionStatus,
+        canSave: status === 'granted' && (Platform.OS !== 'ios' || !canAskAgain), // Only save if fully granted
+      };
     } catch (err) {
       console.warn('Location permission error:', err);
-      return false;
+      return {
+        status: 'denied',
+        canSave: false,
+      };
     }
   }
 
   /**
    * Get current location with error handling
+   * Returns location data and permission info
    */
-  public async getCurrentLocation(): Promise<LocationData> {
+  public async getCurrentLocation(options?: { skipSaveCheck?: boolean }): Promise<LocationData & { permissionStatus: LocationPermissionResult }> {
     try {
-      // Check if permission is already granted first
-      let hasPermission = await this.isLocationEnabled();
+      // Check current permission status
+      let permissionResult = await this.checkLocationPermission();
       
-      // Only request permission if not already granted
-      if (!hasPermission) {
-        hasPermission = await this.requestLocationPermission();
+      // Request permission if not determined or denied
+      if (permissionResult.status === 'undetermined' || permissionResult.status === 'denied') {
+        permissionResult = await this.requestLocationPermission();
       }
       
-      if (!hasPermission) {
-        throw new Error('Location permission denied');
+      // If still denied, throw error
+      if (permissionResult.status === 'denied') {
+        throw new Error('Location permission denied. Please enable location access in settings.');
       }
 
       // Get location with configuration
@@ -92,18 +165,21 @@ class LocationService {
         time: location.timestamp,
         city,
         country,
+        permissionStatus: permissionResult,
       };
     } catch (error: any) {
-      console.error('Location error:', error);
-      
       // Handle specific error cases
-      if (error.message?.includes('permission')) {
+      if (error.message?.includes('permission') || error.message?.includes('denied')) {
+        // Don't log console errors for permission denial - user made their choice
         throw new Error('Location permission denied. Please enable location access in settings.');
       } else if (error.message?.includes('unavailable')) {
+        console.error('Location error:', error);
         throw new Error('Location services are unavailable. Please check your device settings.');
       } else if (error.message?.includes('timeout')) {
+        console.error('Location error:', error);
         throw new Error('Location request timed out. Please try again.');
       } else {
+        console.error('Location error:', error);
         throw new Error('Failed to get location. Please try again.');
       }
     }
@@ -132,13 +208,29 @@ class LocationService {
 
   /**
    * Check if location services are enabled
+   * Returns true only if permission is fully granted ("Allow While Using App")
    */
   public async isLocationEnabled(): Promise<boolean> {
     try {
-      const { status } = await Location.getForegroundPermissionsAsync();
-      return status === 'granted';
+      const permissionResult = await this.checkLocationPermission();
+      return permissionResult.status === 'granted' && permissionResult.canSave;
     } catch (error) {
       return false;
+    }
+  }
+
+  /**
+   * Get permission status message for user
+   */
+  public getPermissionMessage(permissionResult: LocationPermissionResult): string {
+    if (permissionResult.status === 'granted' && permissionResult.canSave) {
+      return 'Location access granted. Your location will be saved.';
+    } else if (permissionResult.status === 'ephemeral') {
+      return 'Location access granted for this session only. Location will not be saved.';
+    } else if (permissionResult.status === 'denied') {
+      return 'Location access denied. Please enable location access in Settings to use this feature.';
+    } else {
+      return 'Location permission is required to use this feature.';
     }
   }
 
