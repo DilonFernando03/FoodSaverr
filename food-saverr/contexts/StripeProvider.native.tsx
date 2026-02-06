@@ -18,7 +18,11 @@ export function StripeProvider({ children }: { children: ReactNode }) {
     const initializeStripe = async () => {
       try {
         // Check if we're in Expo Go (Stripe requires native modules, not available in Expo Go)
-        const isExpoGo = Constants.executionEnvironment === Constants.ExecutionEnvironment.StoreClient;
+        // Constants.executionEnvironment can be: 'storeClient' (Expo Go), 'standalone', 'bare', or 'bareWorkflow'
+        const isExpoGo = Constants.executionEnvironment === 'storeClient' || 
+                         (Constants.executionEnvironment && 
+                          typeof Constants.executionEnvironment === 'string' && 
+                          Constants.executionEnvironment.toLowerCase().includes('store'));
         
         if (isExpoGo) {
           console.warn('Stripe React Native requires a development build. Expo Go does not support native modules.');
